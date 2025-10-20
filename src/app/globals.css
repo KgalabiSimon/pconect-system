@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 60% 95%; /* Light blue background #e5f4fb */
+    --foreground: 197 50% 30%; /* Dark teal text */
+    --card: 0 0% 100%;
+    --card-foreground: 197 50% 30%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 197 50% 30%;
+    --primary: 193 45% 40%; /* Teal #357e95 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 193 35% 65%; /* Light teal #8cb9cc */
+    --secondary-foreground: 197 50% 30%;
+    --muted: 210 40% 90%;
+    --muted-foreground: 197 30% 45%;
+    --accent: 193 45% 85%;
+    --accent-foreground: 197 50% 30%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 193 30% 80%;
+    --input: 193 30% 80%;
+    --ring: 193 45% 40%;
+    --radius: 1rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
