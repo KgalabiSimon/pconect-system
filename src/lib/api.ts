@@ -24,11 +24,11 @@ export async function registerUser(payload: RegisterUserPayload) {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    let errorData = {};
+    let errorData: any = {};
     try {
       errorData = await response.json();
     } catch {}
-    throw new Error(errorData.message || "Failed to register user");
+    throw new Error(errorData?.message || "Failed to register user");
   }
   return response.json();
 }
