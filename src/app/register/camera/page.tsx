@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Camera, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { registerUser } from "@/lib/api";
+import { registerUser, RegisterUserPayload } from "@/lib/api";
 
 export default function CameraPage() {
   const router = useRouter();
@@ -87,7 +87,7 @@ export default function CameraPage() {
   };
 
   // Read form data from sessionStorage
-  const [formData, setFormData] = useState<any>(null);
+  const [formData, setFormData] = useState<RegisterUserPayload | null>(null);
   useEffect(() => {
     if (typeof window !== "undefined") {
       const data = sessionStorage.getItem("registerFormData");
@@ -109,8 +109,12 @@ export default function CameraPage() {
       await registerUser({ ...formData, image: capturedImage });
       alert("User registered successfully!");
       router.push("/");
-    } catch (error: any) {
-      alert(error.message || "Failed to register user");
+    } catch (error) {
+      if (error instanceof Error) {
+        alert(error.message || "Failed to register user");
+      } else {
+        alert("Failed to register user");
+      }
     }
   };
 
