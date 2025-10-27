@@ -252,7 +252,7 @@ export default function UserManagementPage() {
         try {
           errorData = await response.json();
         } catch {}
-        throw new Error(errorData.message || "Failed to register user");
+  throw new Error((errorData as { message?: string })?.message || "Failed to register user");
       }
 
       setShowAddModal(false);
