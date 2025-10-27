@@ -86,17 +86,18 @@ export default function RegisterPage() {
       return;
     }
 
-    // Save registration data to sessionStorage
-    sessionStorage.setItem("email", email);
-    sessionStorage.setItem("firstName", firstName);
-    sessionStorage.setItem("lastName", lastName);
-    sessionStorage.setItem("phone", phone);
-    sessionStorage.setItem("building", building);
-    sessionStorage.setItem("programme", employer);
-    sessionStorage.setItem("laptopModel", laptopModel);
-    sessionStorage.setItem("assetNumber", assetNumber);
-
-    // Navigate to camera page for selfie
+    // Save form data to sessionStorage and navigate to camera page
+    const formData = {
+      firstName,
+      lastName,
+      email,
+      phone,
+      building,
+      programme: employer,
+      laptop: laptopModel,
+      assetNumber,
+    };
+    sessionStorage.setItem("registerFormData", JSON.stringify(formData));
     router.push("/register/camera");
   };
 

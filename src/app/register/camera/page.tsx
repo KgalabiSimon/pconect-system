@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Camera, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { registerUser } from "@/lib/api";
 
 export default function CameraPage() {
   const router = useRouter();
@@ -85,16 +86,32 @@ export default function CameraPage() {
       });
   };
 
-  const confirmAndContinue = () => {
-    // Save selfie data (in a real app, this would upload to server)
-    sessionStorage.setItem("selfieCaptured", "true");
-    sessionStorage.setItem("isLoggedIn", "true");
-    if (capturedImage) {
-      sessionStorage.setItem("selfieImage", capturedImage);
+  // Read form data from sessionStorage
+  const [formData, setFormData] = useState<any>(null);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const data = sessionStorage.getItem("registerFormData");
+      if (data) setFormData(JSON.parse(data));
     }
+  }, []);
 
-    // Navigate to home page
-    router.push("/");
+  const confirmAndContinue = async () => {
+    if (!capturedImage) {
+      alert("Please capture a photo first.");
+      return;
+    }
+    if (!formData) {
+      alert("User details not found. Please register again.");
+      router.push("/register");
+      return;
+    }
+    try {
+      await registerUser({ ...formData, image: capturedImage });
+      alert("User registered successfully!");
+      router.push("/");
+    } catch (error: any) {
+      alert(error.message || "Failed to register user");
+    }
   };
 
   return (

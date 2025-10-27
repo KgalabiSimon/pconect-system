@@ -41,6 +41,8 @@ interface User {
   totalCheckIns: number;
 }
 
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL;
+
 export default function UserManagementPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
@@ -211,7 +213,7 @@ export default function UserManagementPage() {
     setShowAddModal(true);
   };
 
-  const handleSaveNewUser = () => {
+  const handleSaveNewUser = async () => {
     try {
       // Validate form
       if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone) {
@@ -219,8 +221,9 @@ export default function UserManagementPage() {
         return;
       }
 
-      const newUser: User = {
-        id: `USR-${String(users.length + 1).padStart(3, "0")}`,
+
+      const url = `${BASE_URL}/api/v1/auth/register`;
+      const payload = {
         firstName: formData.firstName,
         lastName: formData.lastName,
         email: formData.email,
@@ -231,13 +234,30 @@ export default function UserManagementPage() {
         block: formData.block,
         laptop: formData.laptop,
         assetNumber: formData.assetNumber,
-        createdAt: new Date().toISOString().split("T")[0],
-        totalCheckIns: 0,
       };
 
-      setUsers([...users, newUser]);
+      console.log("[AddUser] POST URL:", url);
+      console.log("[AddUser] Payload:", payload);
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        let errorData = {};
+        try {
+          errorData = await response.json();
+        } catch {}
+        throw new Error(errorData.message || "Failed to register user");
+      }
+
       setShowAddModal(false);
-      alert("User added successfully!");
+      alert("User registered successfully!");
+      // Optionally, refresh users list here
     } catch (error) {
       console.error("Add user error:", error);
       alert("Failed to add user. Please try again.");
