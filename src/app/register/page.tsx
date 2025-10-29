@@ -13,9 +13,11 @@ import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useBuildingSelection } from "@/hooks/api/useBuildingSelection";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelection();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -26,13 +28,6 @@ export default function RegisterPage() {
   const [laptopModel, setLaptopModel] = useState("");
   const [assetNumber, setAssetNumber] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-
-  // Building data
-  const buildings = [
-    "The Department of Science, Technology and Innovation",
-    "Building 41",
-    "Building 42",
-  ];
 
   // Programme data
   const programmes = [
@@ -211,11 +206,17 @@ export default function RegisterPage() {
                 <SelectValue placeholder="Select a building" />
               </SelectTrigger>
               <SelectContent>
-                {buildings.map((b) => (
-                  <SelectItem key={b} value={b}>
-                    {b}
+                {buildingsLoading ? (
+                  <SelectItem value="loading" disabled>
+                    Loading buildings...
                   </SelectItem>
-                ))}
+                ) : (
+                  buildingOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>

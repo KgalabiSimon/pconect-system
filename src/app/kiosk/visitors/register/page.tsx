@@ -32,6 +32,9 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
+import { useVisitors } from "@/hooks/api/useVisitors";
+import { useUsers } from "@/hooks/api/useUsers";
+import { AlertCircle } from "lucide-react";
 
 interface Employee {
   id: string;
@@ -62,6 +65,9 @@ interface VisitorFormData {
 }
 
 export default function VisitorKioskPage() {
+  const { registerVisitor, isLoading: visitorLoading, error: visitorError, clearError: clearVisitorError } = useVisitors();
+  const { users, loadUsers, isLoading: usersLoading } = useUsers();
+  
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<VisitorFormData>({
     visitPurpose: "",
@@ -156,18 +162,37 @@ export default function VisitorKioskPage() {
       return;
     }
 
-    const debounceTimer = setTimeout(() => {
+    const debounceTimer = setTimeout(async () => {
       setIsSearching(true);
-      // Simulate API call
-      const results = sampleEmployees.filter((emp) =>
-        emp.fullName.toLowerCase().includes(employeeSearchQuery.toLowerCase())
-      );
-      setEmployeeSearchResults(results);
-      setIsSearching(false);
+      try {
+        // Load users from Azure API
+        await loadUsers();
+        
+        // Filter users based on search query
+        const results = users
+          .filter(user => 
+            user.first_name.toLowerCase().includes(employeeSearchQuery.toLowerCase()) ||
+            user.last_name.toLowerCase().includes(employeeSearchQuery.toLowerCase()) ||
+            `${user.first_name} ${user.last_name}`.toLowerCase().includes(employeeSearchQuery.toLowerCase())
+          )
+          .map(user => ({
+            id: user.id,
+            fullName: `${user.first_name} ${user.last_name}`,
+            department: user.programme_id || "Unknown",
+            phoneExt: user.phone,
+          }));
+        
+        setEmployeeSearchResults(results);
+      } catch (error) {
+        console.error('Error searching employees:', error);
+        setEmployeeSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
     }, 250);
 
     return () => clearTimeout(debounceTimer);
-  }, [employeeSearchQuery]);
+  }, [employeeSearchQuery, loadUsers, users]);
 
   // Auto-reset after success (30 seconds)
   useEffect(() => {
@@ -457,22 +482,41 @@ export default function VisitorKioskPage() {
     if (!validateStep(4)) return;
 
     setIsSubmitting(true);
+    clearVisitorError();
 
     try {
-      // Simulate API submission
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Prepare visitor data for Azure API
+      const visitorData = {
+        first_name: formData.firstName,
+        last_name: formData.surname,
+        company: formData.company,
+        mobile: formData.mobile,
+        host_employee_id: formData.employeeId,
+        host_employee_name: formData.employeeName,
+        floor: formData.floor,
+        block: formData.block,
+        visit_purpose: formData.visitPurpose === "EmployeeVisit" 
+          ? `Visiting ${formData.employeeName}` 
+          : formData.otherReason,
+        has_weapons: formData.hasWeapons === "yes",
+        weapon_details: formData.hasWeapons === "yes" ? formData.weaponDetails : undefined,
+        photo_url: formData.photoUrl, // In production, upload photo first and get URL
+      };
 
-      // In production, you would:
-      // 1. Upload photo: POST /api/uploads
-      // 2. Submit registration: POST /api/visitors/registrations
+      // Register visitor with Azure API
+      const newVisitor = await registerVisitor(visitorData);
 
-      console.log("Visitor registration submitted:", {
-        ...formData,
-        timestamp: new Date().toISOString(),
-        deviceId: localStorage.getItem("kioskDeviceId") || "KIOSK-001",
-      });
+      if (newVisitor) {
+        console.log("Visitor registration submitted:", {
+          visitorId: newVisitor.id,
+          timestamp: new Date().toISOString(),
+          deviceId: localStorage.getItem("kioskDeviceId") || "KIOSK-001",
+        });
 
-      setShowSuccess(true);
+        setShowSuccess(true);
+      } else {
+        alert("Failed to submit registration. Please try again.");
+      }
     } catch (error) {
       console.error("Submission error:", error);
       alert("Failed to submit registration. Please try again.");
@@ -523,6 +567,24 @@ export default function VisitorKioskPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-4 md:p-8">
+      {/* Error Message */}
+      {visitorError && (
+        <div className="max-w-4xl mx-auto mb-4">
+          <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg">
+            <div className="flex items-center gap-2 text-red-700">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm">{visitorError}</span>
+              <button
+                onClick={clearVisitorError}
+                className="ml-auto text-red-500 hover:text-red-700"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="max-w-4xl mx-auto mb-6">
         <Card className="p-6">

@@ -4,23 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBooking } from "@/contexts/BookingContext";
+import { useBuildings } from "@/hooks/api/useBuildings";
 import { ArrowLeft, Building2, Calendar, Check, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function BookingsPage() {
   const router = useRouter();
   const { bookingState, setBuilding, setFloor, setType, setDate, setTime } = useBooking();
+  const { buildings, isLoading: buildingsLoading } = useBuildings();
   const [step, setStep] = useState(1);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
 
-  const buildings = [
-    { id: 41 as const, name: "Building 41" },
-    { id: 42 as const, name: "Building 42" },
-    { id: "DSTI" as const, name: "DSTI Building" },
-  ];
   const floors = ["Ground", "1st", "2nd"] as const;
   const bookingTypes = [
     { id: "desk" as const, name: "Desk", desc: "Hot desk for the day" },
@@ -68,6 +65,18 @@ export default function BookingsPage() {
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
   };
+
+  // Show loading state while buildings are loading
+  if (buildingsLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading buildings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -122,18 +131,18 @@ export default function BookingsPage() {
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-foreground">Select Building</h2>
             <div className="grid grid-cols-2 gap-4">
-              {buildings.map((bldg) => (
+              {buildings.map((building) => (
                 <Card
-                  key={bldg.id}
-                  onClick={() => setBuilding(bldg.id)}
+                  key={building.id}
+                  onClick={() => setBuilding(building.id)}
                   className={`p-6 cursor-pointer transition-all ${
-                    bookingState.building === bldg.id
+                    bookingState.building === building.id
                       ? "border-2 border-primary bg-primary/5"
                       : "border-2 border-transparent hover:border-gray-300"
                   }`}
                 >
                   <Building2 className="w-12 h-12 text-primary mx-auto mb-3" />
-                  <div className="text-center font-semibold">{bldg.name}</div>
+                  <div className="text-center font-semibold">{building.name}</div>
                 </Card>
               ))}
             </div>
@@ -213,7 +222,7 @@ export default function BookingsPage() {
             <Card className="p-4 bg-blue-50 border-blue-200">
               <h3 className="font-semibold mb-2">Booking Summary</h3>
               <div className="text-sm space-y-1">
-                <p>Building: {bookingState.building}</p>
+                <p>Building: {buildings.find(b => b.id === bookingState.building)?.name || bookingState.building}</p>
                 {bookingState.floor && <p>Floor: {bookingState.floor}</p>}
                 <p>Type: {bookingTypes.find((t) => t.id === bookingState.type)?.name}</p>
                 {bookingState.date && <p>Date: {bookingState.date}</p>}
@@ -300,7 +309,7 @@ export default function BookingsPage() {
             <Card className="p-4 bg-blue-50 border-blue-200">
               <h3 className="font-semibold mb-2">Booking Summary</h3>
               <div className="text-sm space-y-1">
-                <p>Building: {bookingState.building}</p>
+                <p>Building: {buildings.find(b => b.id === bookingState.building)?.name || bookingState.building}</p>
                 {bookingState.floor && <p>Floor: {bookingState.floor}</p>}
                 <p>Type: Meeting Room</p>
                 <p>Date: {bookingState.date}</p>

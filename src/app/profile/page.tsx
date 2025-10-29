@@ -9,14 +9,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Camera, Save, User } from "lucide-react";
+import { ArrowLeft, Camera, Save, User, AlertCircle } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/api/useAuth";
+import { useUsers } from "@/hooks/api/useUsers";
+import { useBuildingSelection } from "@/hooks/api/useBuildingSelection";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { user: authUser, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { updateProfile, isUpdating, error, clearError } = useUsers();
+  const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelection();
+  
   const [isEditing, setIsEditing] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -27,13 +35,6 @@ export default function ProfilePage() {
   const [assetNumber, setAssetNumber] = useState("");
   const [email, setEmail] = useState("");
   const [selfieData, setSelfieData] = useState<string | null>(null);
-
-  // Building data
-  const buildings = [
-    "The Department of Science, Technology and Innovation",
-    "Building 41",
-    "Building 42",
-  ];
 
   // Programme data
   const programmes = [
@@ -47,56 +48,71 @@ export default function ProfilePage() {
   ];
 
   useEffect(() => {
-    // Check if user is logged in
-    const loggedIn = sessionStorage.getItem("isLoggedIn");
-    if (!loggedIn) {
-      router.push("/login");
-      return;
+    // Load user data from Azure API
+    if (authUser) {
+      setFirstName(authUser.first_name || "");
+      setLastName(authUser.last_name || "");
+      setPhone(authUser.phone || "");
+      setBuilding(authUser.building_id || "");
+      setProgramme(authUser.programme || "");
+      setLaptopModel(authUser.laptop_model || "");
+      setAssetNumber(authUser.laptop_asset_number || "");
+      setEmail(authUser.email || "");
+      setSelfieData(authUser.photo_url || null);
     }
+  }, [authUser]);
 
-    // Load user data from sessionStorage (in real app, would fetch from API)
-    const storedFirstName = sessionStorage.getItem("firstName") || "John";
-    const storedLastName = sessionStorage.getItem("lastName") || "Doe";
-    const storedPhone = sessionStorage.getItem("phone") || "+27 123 456 789";
-    const storedBuilding = sessionStorage.getItem("building") || "Building 41";
-    const storedProgramme = sessionStorage.getItem("programme") || "Programme 1A";
-    const storedLaptopModel = sessionStorage.getItem("laptopModel") || "Dell Latitude";
-    const storedAssetNumber = sessionStorage.getItem("assetNumber") || "DST-001234";
-    const storedEmail = sessionStorage.getItem("email") || "user@example.com";
-    const storedSelfie = sessionStorage.getItem("selfieImage");
+  const handleSave = async () => {
+    try {
+      clearError();
+      
+      const profileData = {
+        first_name: firstName,
+        last_name: lastName,
+        phone: phone,
+        building_id: building,
+        programme: programme,
+        laptop_model: laptopModel,
+        laptop_asset_number: assetNumber,
+      };
 
-    setFirstName(storedFirstName);
-    setLastName(storedLastName);
-    setPhone(storedPhone);
-    setBuilding(storedBuilding);
-    setProgramme(storedProgramme);
-    setLaptopModel(storedLaptopModel);
-    setAssetNumber(storedAssetNumber);
-    setEmail(storedEmail);
-    setSelfieData(storedSelfie);
-  }, [router]);
-
-  const handleSave = () => {
-    // Save updated data to sessionStorage (in real app, would send to API)
-    sessionStorage.setItem("firstName", firstName);
-    sessionStorage.setItem("lastName", lastName);
-    sessionStorage.setItem("phone", phone);
-    sessionStorage.setItem("building", building);
-    sessionStorage.setItem("programme", programme);
-    sessionStorage.setItem("laptopModel", laptopModel);
-    sessionStorage.setItem("assetNumber", assetNumber);
-
-    setIsEditing(false);
-    alert("Profile updated successfully!");
+      const updatedUser = await updateProfile(profileData);
+      
+      if (updatedUser) {
+        setIsEditing(false);
+        alert("Profile updated successfully!");
+      } else {
+        alert("Failed to update profile. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      alert("Failed to update profile. Please try again.");
+    }
   };
 
   const handleRetakeSelfie = () => {
     router.push("/register/camera");
   };
 
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    router.push("/login");
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
+    <ProtectedRoute>
+      <div className="min-h-screen bg-background">
+        {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-primary p-1 -ml-1 active:opacity-60">
@@ -118,12 +134,32 @@ export default function ProfilePage() {
             onClick={handleSave}
             size="sm"
             className="bg-primary text-white font-semibold flex items-center gap-1"
+            disabled={isUpdating}
           >
-            <Save className="w-4 h-4" />
-            Save
+            {isUpdating ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                Save
+              </>
+            )}
           </Button>
         )}
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="mx-4 md:mx-6 mt-4">
+          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span className="text-sm">{error}</span>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="p-4 md:p-6 max-w-2xl mx-auto">
@@ -229,11 +265,17 @@ export default function ProfilePage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {buildings.map((b) => (
-                  <SelectItem key={b} value={b}>
-                    {b}
+                {buildingsLoading ? (
+                  <SelectItem value="loading" disabled>
+                    Loading buildings...
                   </SelectItem>
-                ))}
+                ) : (
+                  buildingOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -299,6 +341,7 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
