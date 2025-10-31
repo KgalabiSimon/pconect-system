@@ -5,18 +5,48 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Shield, Eye, EyeOff, AlertCircle } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/api/useAuth";
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const { loginAdmin, isLoading, error, clearError } = useAuth();
+  const { loginAdmin, isLoading, error, clearError, user, isAuthenticated } = useAuth();
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [justLoggedIn, setJustLoggedIn] = useState(false);
+
+  // Verify admin role after login
+  useEffect(() => {
+    if (justLoggedIn && isAuthenticated && user) {
+      console.log('🔍 Admin login verification:', {
+        isAuthenticated: isAuthenticated,
+        userRole: user?.role || 'not set',
+        userId: user?.id,
+        email: user?.email,
+        name: user ? `${user.first_name} ${user.last_name}` : 'N/A',
+        is_active: user?.is_active
+      });
+      
+      // Check if user has admin role
+      if (user?.role === 'admin') {
+        console.log('✅ Admin role verified, redirecting to dashboard');
+      } else {
+        // User logged in but doesn't have admin role
+        console.warn('⚠️ User logged in but role is not "admin":', user?.role || 'not set');
+        console.log('📝 Note: API will enforce permissions on restricted endpoints');
+        console.log('📝 Some features may not be accessible (e.g., User Management requires admin role)');
+      }
+      
+      // Redirect to dashboard (API will enforce permissions)
+      router.push("/admin");
+      setJustLoggedIn(false);
+      setIsSubmitting(false);
+    }
+  }, [justLoggedIn, isAuthenticated, user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,15 +60,20 @@ export default function AdminLoginPage() {
       const success = await loginAdmin(email, password);
       
       if (success) {
-        // Login successful, redirect to admin dashboard
-        router.push("/admin");
+        // Set flag to trigger useEffect for role verification
+        setJustLoggedIn(true);
+        // Note: isSubmitting will be reset after redirect or in useEffect
       } else {
-        // Error will be handled by the auth context
-        console.error("Admin login failed");
+        // Login failed - reset submitting state
+        setIsSubmitting(false);
       }
-    } catch (error) {
-      console.error("Admin login error:", error);
-    } finally {
+      // If login fails, error is handled by auth context - no need to log here
+      // The 401 from admin login is expected and handled gracefully
+    } catch (error: any) {
+      // Only log if it's not an expected 401 error
+      if (error?.status !== 401 && !error?.isExpected) {
+        console.error("Admin login error:", error);
+      }
       setIsSubmitting(false);
     }
   };

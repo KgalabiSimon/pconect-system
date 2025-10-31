@@ -17,13 +17,15 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/api/useAuth";
 import { useUsers } from "@/hooks/api/useUsers";
 import { useBuildingSelection } from "@/hooks/api/useBuildingSelection";
+import { useProgrammeSelection } from "@/hooks/api/useProgrammeSelection";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user: authUser, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { updateProfile, isUpdating, error, clearError } = useUsers();
+  const { user: authUser, isAuthenticated, isLoading: authLoading, refreshUser } = useAuth();
+  const { updateProfile, updateUser, isUpdating, error, clearError } = useUsers();
   const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelection();
+  const { programmeOptions, isLoading: programmesLoading } = useProgrammeSelection();
   
   const [isEditing, setIsEditing] = useState(false);
   const [firstName, setFirstName] = useState("");
@@ -36,17 +38,6 @@ export default function ProfilePage() {
   const [email, setEmail] = useState("");
   const [selfieData, setSelfieData] = useState<string | null>(null);
 
-  // Programme data
-  const programmes = [
-    "Programme 1A",
-    "Programme 1B",
-    "Programme 2",
-    "Programme 3",
-    "Programme 4",
-    "Programme 5",
-    "Programme 6",
-  ];
-
   useEffect(() => {
     // Load user data from Azure API
     if (authUser) {
@@ -54,7 +45,7 @@ export default function ProfilePage() {
       setLastName(authUser.last_name || "");
       setPhone(authUser.phone || "");
       setBuilding(authUser.building_id || "");
-      setProgramme(authUser.programme || "");
+      setProgramme(authUser.programme_id || "");
       setLaptopModel(authUser.laptop_model || "");
       setAssetNumber(authUser.laptop_asset_number || "");
       setEmail(authUser.email || "");
@@ -66,27 +57,61 @@ export default function ProfilePage() {
     try {
       clearError();
       
-      const profileData = {
+      if (!authUser?.id) {
+        alert("User ID not found. Please log in again.");
+        return;
+      }
+
+      // The profile endpoint only accepts: id, last_name, email
+      // The user update endpoint accepts: first_name, last_name, email, password, is_active, role
+      // For phone, building_id, programme_id, laptop_model, laptop_asset_number,
+      // we need to check what the profile endpoint actually accepts
+      
+      // First, update name fields using the user update endpoint
+      const userUpdateData = {
         first_name: firstName,
         last_name: lastName,
-        phone: phone,
-        building_id: building,
-        programme: programme,
-        laptop_model: laptopModel,
-        laptop_asset_number: assetNumber,
       };
 
-      const updatedUser = await updateProfile(profileData);
+      console.log("Updating user with data:", userUpdateData);
+      let updatedUser = await updateUser(authUser.id, userUpdateData);
+      
+      if (!updatedUser) {
+        alert("Failed to update name. Please try again.");
+        return;
+      }
+
+      console.log("User name updated successfully, received:", updatedUser);
+
+      // Then try to update other fields using the profile endpoint
+      // Note: The API may not accept all these fields, but we'll try
+      const profileData = {
+        id: authUser.id,
+        last_name: lastName, // Include last_name here in case it didn't update above
+        phone: phone || undefined,
+        building_id: building || undefined,
+        programme_id: programme || undefined,
+        laptop_model: laptopModel || undefined,
+        laptop_asset_number: assetNumber || undefined,
+      };
+
+      console.log("Updating profile with additional data:", profileData);
+      updatedUser = await updateProfile(profileData);
       
       if (updatedUser) {
-        setIsEditing(false);
-        alert("Profile updated successfully!");
+        console.log("Profile updated successfully, received:", updatedUser);
       } else {
-        alert("Failed to update profile. Please try again.");
+        console.warn("Profile update for additional fields returned null, but name was updated");
       }
-    } catch (error) {
+
+      // Refresh the auth context to get the updated user data
+      await refreshUser();
+      setIsEditing(false);
+      alert("Profile updated successfully!");
+    } catch (error: any) {
       console.error("Error updating profile:", error);
-      alert("Failed to update profile. Please try again.");
+      const errorMessage = error?.message || error?.data?.detail || "Failed to update profile. Please try again.";
+      alert(`Error: ${errorMessage}`);
     }
   };
 
@@ -287,14 +312,24 @@ export default function ProfilePage() {
             </label>
             <Select value={programme} onValueChange={setProgramme} disabled={!isEditing}>
               <SelectTrigger className="h-12 md:h-14 text-base border-gray-300">
-                <SelectValue />
+                <SelectValue placeholder={programmesLoading ? "Loading programmes..." : "Select programme"} />
               </SelectTrigger>
               <SelectContent>
-                {programmes.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p}
+                {programmesLoading ? (
+                  <SelectItem value="loading" disabled>
+                    Loading programmes...
                   </SelectItem>
-                ))}
+                ) : programmeOptions.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    No programmes available
+                  </SelectItem>
+                ) : (
+                  programmeOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>

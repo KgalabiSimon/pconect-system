@@ -1,19 +1,40 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Camera, CheckCircle2 } from "lucide-react";
+import { Camera, CheckCircle2, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { authService, usersService } from "@/lib/api";
+import { useAuth } from "@/hooks/api/useAuth";
 
 export default function CameraPage() {
   const router = useRouter();
+  const { loginUser, refreshUser } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [registeredUserId, setRegisteredUserId] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check if user just registered (has pending photo user ID)
+    const pendingPhotoUserId = sessionStorage.getItem("pendingPhotoUserId");
+    console.log("📷 Camera page - pendingPhotoUserId:", pendingPhotoUserId);
+    
+    if (pendingPhotoUserId) {
+      console.log("✅ User registered, starting camera for user:", pendingPhotoUserId);
+      setRegisteredUserId(pendingPhotoUserId);
+      sessionStorage.removeItem("pendingPhotoUserId");
+    } else {
+      // If no pending registration, redirect to registration page
+      console.log("⚠️ No pending registration found, redirecting to register page");
+      router.push("/register");
+      return;
+    }
+
     let currentStream: MediaStream | null = null;
 
     // Request camera access
@@ -42,7 +63,7 @@ export default function CameraPage() {
         currentStream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [router]);
 
   const capturePhoto = () => {
     if (videoRef.current && canvasRef.current) {
@@ -85,16 +106,52 @@ export default function CameraPage() {
       });
   };
 
-  const confirmAndContinue = () => {
-    // Save selfie data (in a real app, this would upload to server)
-    sessionStorage.setItem("selfieCaptured", "true");
-    sessionStorage.setItem("isLoggedIn", "true");
-    if (capturedImage) {
-      sessionStorage.setItem("selfieImage", capturedImage);
+  const confirmAndContinue = async () => {
+    if (!capturedImage) {
+      setError("Please capture a photo first");
+      return;
     }
 
-    // Navigate to home page
-    router.push("/");
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      console.log("📸 Processing photo for user:", registeredUserId);
+      
+      // For now, store photo as data URL in localStorage
+      // In production, this should upload to Azure Blob Storage or similar
+      // and update the user's photo_url field via API
+      
+      // Store photo temporarily in localStorage for profile display
+      localStorage.setItem("user_photo_data", capturedImage);
+      console.log("✅ Photo stored in localStorage");
+
+      // If we have a registered user ID, we could update the photo_url
+      // However, since file upload endpoint may not exist, we'll skip for now
+      // The photo will be available from localStorage until proper upload is implemented
+      
+      // Note: In a real implementation, you would:
+      // 1. Upload photo to Azure Blob Storage or file service
+      // 2. Get the URL back
+      // 3. Update user profile with photo_url via usersService.updateUser()
+
+      // For now, since the user is already registered, we need to log them in
+      // We'll need to get the email/password from somewhere - but we don't have it
+      // So we'll just navigate to login page with a message
+      
+      // Clear any old session data
+      sessionStorage.removeItem("selfieCaptured");
+      sessionStorage.removeItem("selfieImage");
+      
+      console.log("✅ Registration complete! Navigating to login page...");
+      // Navigate to login page with success message
+      router.push("/login?registered=true");
+    } catch (err: any) {
+      console.error("❌ Error processing photo:", err);
+      setError("Failed to process photo. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -108,6 +165,14 @@ export default function CameraPage() {
 
       {/* Camera View */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gray-900">
+        {/* Error Message */}
+        {error && (
+          <div className="w-full max-w-md mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span className="text-sm">{error}</span>
+          </div>
+        )}
+
         <div className="w-full max-w-md">
           <div className="relative aspect-[3/4] bg-black rounded-lg overflow-hidden shadow-xl">
             {!capturedImage ? (
@@ -165,10 +230,20 @@ export default function CameraPage() {
               <>
                 <Button
                   onClick={confirmAndContinue}
-                  className="w-full h-14 text-base md:text-lg font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2"
+                  className="w-full h-14 text-base md:text-lg font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isProcessing}
                 >
-                  <CheckCircle2 className="w-5 h-5" />
-                  CONFIRM & CONTINUE
+                  {isProcessing ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-5 h-5" />
+                      CONFIRM & CONTINUE
+                    </>
+                  )}
                 </Button>
                 <Button
                   onClick={retakePhoto}

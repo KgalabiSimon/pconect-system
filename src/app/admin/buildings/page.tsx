@@ -50,6 +50,7 @@ export default function BuildingManagementPage() {
     name: "",
     address: "",
     floors_count: 1,
+    blocks_count: 1,
   });
 
   useEffect(() => {
@@ -101,6 +102,7 @@ export default function BuildingManagementPage() {
       name: building.name,
       address: building.address,
       floors_count: building.floors_count,
+      blocks_count: building.blocks_count,
     });
     setShowEditModal(true);
   };
@@ -111,6 +113,7 @@ export default function BuildingManagementPage() {
       name: "",
       address: "",
       floors_count: 1,
+      blocks_count: 1,
     });
     setShowAddModal(true);
   };
@@ -123,6 +126,7 @@ export default function BuildingManagementPage() {
         name: formData.name,
         address: formData.address,
         floors_count: formData.floors_count,
+        blocks_count: formData.blocks_count,
       };
       const createdBuilding = await createBuilding(newBuilding);
       if (createdBuilding) {
@@ -132,9 +136,24 @@ export default function BuildingManagementPage() {
       } else {
         alert("Failed to add building. Please try again.");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Add building error:", error);
-      alert("Failed to add building. Please try again.");
+      // Extract detailed error message
+      let errorMessage = "Failed to add building. Please try again.";
+      if (error?.details?.detail) {
+        if (Array.isArray(error.details.detail)) {
+          // Handle validation errors
+          const validationErrors = error.details.detail.map((e: any) => 
+            `${e.loc?.join('.') || 'Field'}: ${e.msg}`
+          ).join('\n');
+          errorMessage = `Validation errors:\n${validationErrors}`;
+        } else {
+          errorMessage = error.details.detail;
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      alert(errorMessage);
     }
   };
 
@@ -147,6 +166,7 @@ export default function BuildingManagementPage() {
         name: formData.name,
         address: formData.address,
         floors_count: formData.floors_count,
+        blocks_count: formData.blocks_count,
       };
 
       const updatedBuilding = await updateBuilding(selectedBuilding.id, updatedBuildingData);
@@ -397,7 +417,18 @@ export default function BuildingManagementPage() {
                     type="number"
                     min="1"
                     value={formData.floors_count}
-                    onChange={(e) => setFormData({ ...formData, floors_count: parseInt(e.target.value) })}
+                    onChange={(e) => setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 })}
+                    className="h-10"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Blocks</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.blocks_count}
+                    onChange={(e) => setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 })}
                     className="h-10"
                     required
                   />
@@ -474,7 +505,18 @@ export default function BuildingManagementPage() {
                     type="number"
                     min="1"
                     value={formData.floors_count}
-                    onChange={(e) => setFormData({ ...formData, floors_count: parseInt(e.target.value) })}
+                    onChange={(e) => setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 })}
+                    className="h-10"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Blocks</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.blocks_count}
+                    onChange={(e) => setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 })}
                     className="h-10"
                     required
                   />

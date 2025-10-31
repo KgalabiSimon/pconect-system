@@ -282,7 +282,8 @@ export default function UserManagementPage() {
     return null;
   }
 
-  if (isLoading) {
+  // Show loading only if not an error (error state should show message instead)
+  if (isLoading && !error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -303,15 +304,23 @@ export default function UserManagementPage() {
       <div className="min-h-screen bg-gray-50">
         {/* Error Message */}
         {error && (
-          <div className="bg-red-50 border border-red-200 px-4 py-3 mx-4 mt-4 rounded-lg">
-            <div className="flex items-center gap-2 text-red-700">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <span className="text-sm">{error}</span>
+          <div className="bg-red-50 border-l-4 border-red-500 px-6 py-4 mx-auto max-w-7xl mt-4">
+            <div className="flex items-center gap-3 text-red-800">
+              <AlertCircle className="w-6 h-6 flex-shrink-0 text-red-600" />
+              <div className="flex-1">
+                <p className="font-medium text-base">{error}</p>
+                {error.includes('permission') && (
+                  <p className="text-sm text-red-700 mt-1">
+                    Your account does not have access to this feature. If you believe this is an error, please contact your system administrator.
+                  </p>
+                )}
+              </div>
               <button
                 onClick={clearError}
-                className="ml-auto text-red-500 hover:text-red-700"
+                className="text-red-500 hover:text-red-700 p-1 rounded"
+                title="Dismiss"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
           </div>

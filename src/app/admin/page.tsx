@@ -76,9 +76,8 @@ export default function AdminDashboardPage() {
     );
   }
 
-  // Redirect to login if not authenticated
+  // Don't render if not authenticated (redirect is handled in useEffect)
   if (!isAuthenticated) {
-    router.push("/admin/login");
     return null;
   }
 

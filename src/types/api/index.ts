@@ -92,8 +92,14 @@ export interface UserUpdate {
 
 export interface UserProfileUpdate {
   id: string;
+  first_name?: string;
   last_name?: string;
   email?: string;
+  phone?: string;
+  building_id?: string;
+  programme_id?: string;
+  laptop_model?: string;
+  laptop_asset_number?: string;
 }
 
 // Building Types
@@ -361,6 +367,25 @@ export interface PaginatedResponse<T> {
 
 export interface CountResponse {
   count: number;
+}
+
+// Programme Types
+export interface ProgrammeCreate {
+  name: string;
+  description?: string;
+  is_active?: boolean;
+}
+
+export interface ProgrammeResponse extends BaseEntity {
+  name: string;
+  description?: string;
+  is_active: boolean;
+}
+
+export interface ProgrammeUpdate {
+  name?: string;
+  description?: string;
+  is_active?: boolean;
 }
 
 // Utility Types

@@ -7,16 +7,18 @@ import { ArrowLeft, Bell, BellOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/api/useAuth";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
 
   useEffect(() => {
-    // Check if user is logged in
-    const loggedIn = sessionStorage.getItem("isLoggedIn");
-    if (!loggedIn) {
+    // Redirect to login if not authenticated
+    if (!authLoading && !isAuthenticated) {
       router.push("/login");
       return;
     }
@@ -27,12 +29,12 @@ export default function SettingsPage() {
       setNotificationsEnabled(Notification.permission === "granted");
     }
 
-    // Load saved preferences
+    // Load saved preferences (localStorage for client-side notification preferences is fine)
     const savedPref = localStorage.getItem("notificationsEnabled");
     if (savedPref) {
       setNotificationsEnabled(savedPref === "true");
     }
-  }, [router]);
+  }, [router, isAuthenticated, authLoading]);
 
   const handleEnableNotifications = async () => {
     const granted = await notificationService.requestPermission();
@@ -64,8 +66,23 @@ export default function SettingsPage() {
     }
   };
 
+  // Show loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Redirect if not authenticated
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-background">
+    <ProtectedRoute>
+      <div className="min-h-screen bg-background">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
         <Link href="/" className="text-primary p-1 -ml-1 active:opacity-60">
@@ -193,6 +210,7 @@ export default function SettingsPage() {
           </div>
         </Card>
       </div>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }

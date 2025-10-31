@@ -25,6 +25,7 @@ export { ENV_CONFIG, validateEnvConfig, getEnvConfig } from './env';
 export { authService } from './auth';
 export { usersService } from './users';
 export { buildingsService } from './buildings';
+export { programmesService } from './programmes';
 export { spacesService } from './spaces';
 export { bookingsService } from './bookings';
 export { checkInsService } from './checkins';
@@ -51,6 +52,11 @@ export type {
   BuildingCreate,
   BuildingResponse,
   BuildingUpdate,
+  
+  // Programme
+  ProgrammeCreate,
+  ProgrammeResponse,
+  ProgrammeUpdate,
   
   // Space
   SpaceType,

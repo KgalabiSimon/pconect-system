@@ -13,6 +13,7 @@ export interface RequestOptions {
   timeout?: number;
   retries?: number;
   skipAuth?: boolean;
+  suppressErrorLog?: boolean; // Suppress error logging for expected errors
 }
 
 export interface APIResponse<T = any> {
@@ -97,6 +98,7 @@ export class APIClient {
       timeout = API_CONFIG.TIMEOUT,
       retries = API_CONFIG.RETRY_ATTEMPTS,
       skipAuth = false,
+      suppressErrorLog = false,
     } = options;
 
     const url = `${this.baseURL}${endpoint}`;
@@ -148,8 +150,8 @@ export class APIClient {
         success: response.ok,
       };
     } catch (error) {
-      // Log error in development
-      if (API_CONFIG.FEATURES.ENABLE_LOGGING) {
+      // Log error in development (unless suppressed for expected errors like 401 fallbacks)
+      if (API_CONFIG.FEATURES.ENABLE_LOGGING && !suppressErrorLog) {
         console.error(`[API Error] ${method} ${url}`, error);
       }
       throw error;

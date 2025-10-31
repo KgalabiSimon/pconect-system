@@ -83,10 +83,22 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
       
       return userList;
     } catch (err: any) {
+      // Handle 403 Forbidden errors gracefully
+      if (err?.status === 403) {
+        const errorMessage = 'You do not have permission to access user management. Please contact your administrator.';
+        setError(errorMessage);
+        setUsers([]); // Clear users list
+        console.warn('Access forbidden to user management:', err);
+        // Don't throw - allow UI to show error message
+        return [];
+      }
+      
       const errorMessage = err.message || 'Failed to load users';
       setError(errorMessage);
       console.error('Error loading users:', err);
-      throw err;
+      setUsers([]); // Clear users list on error
+      // Don't throw - allow UI to handle gracefully
+      return [];
     } finally {
       setIsLoading(false);
     }

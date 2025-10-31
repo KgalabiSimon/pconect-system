@@ -21,10 +21,11 @@ export class AuthService {
   /**
    * Login regular user
    */
-  async loginUser(credentials: UserLogin): Promise<Token> {
+  async loginUser(credentials: UserLogin, options?: { suppressErrorLog?: boolean }): Promise<Token> {
     const response = await apiClient.post<Token>(
       API_ENDPOINTS.AUTH.LOGIN,
-      credentials
+      credentials,
+      options
     );
     
     if (response.success && response.data.access_token) {
@@ -39,17 +40,31 @@ export class AuthService {
    * Login admin user
    */
   async loginAdmin(credentials: AdminLogin): Promise<Token> {
-    const response = await apiClient.post<Token>(
-      API_ENDPOINTS.AUTH.ADMIN_LOGIN,
-      credentials
-    );
-    
-    if (response.success && response.data.access_token) {
-      // Store token in API client
-      apiClient.setAuthToken(response.data.access_token);
+    try {
+      const response = await apiClient.post<Token>(
+        API_ENDPOINTS.AUTH.ADMIN_LOGIN,
+        credentials,
+        { suppressErrorLog: true } // Suppress error logging - 401 is expected for fallback
+      );
+      
+      if (response.success && response.data.access_token) {
+        // Store token in API client
+        apiClient.setAuthToken(response.data.access_token);
+      }
+      
+      return response.data;
+    } catch (error: any) {
+      // For 401 errors, throw a special error that indicates expected failure
+      // This allows the calling code to handle it gracefully without logging
+      if (error?.status === 401) {
+        const expectedError = new Error('Admin login failed - expected fallback');
+        (expectedError as any).status = 401;
+        (expectedError as any).isExpected = true; // Mark as expected for silent handling
+        throw expectedError;
+      }
+      // For other errors, re-throw as normal
+      throw error;
     }
-    
-    return response.data;
   }
 
   /**
@@ -120,9 +135,10 @@ export class AuthService {
   /**
    * Get current user profile
    */
-  async getCurrentUser(): Promise<UserResponse> {
+  async getCurrentUser(options?: { suppressErrorLog?: boolean }): Promise<UserResponse> {
     const response = await apiClient.get<UserResponse>(
-      API_ENDPOINTS.AUTH.ME
+      API_ENDPOINTS.AUTH.ME,
+      options
     );
     
     return response.data;

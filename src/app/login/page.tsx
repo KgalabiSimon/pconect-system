@@ -2,21 +2,37 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Eye, EyeOff, HelpCircle, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, HelpCircle, AlertCircle, CheckCircle2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/api/useAuth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { loginUser, isLoading, error, clearError } = useAuth();
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+
+  useEffect(() => {
+    // Check if user just registered
+    if (searchParams?.get("registered") === "true") {
+      setShowSuccessMessage(true);
+      // Remove query param from URL
+      router.replace("/login", { scroll: false });
+      // Hide message after 5 seconds
+      const timer = setTimeout(() => {
+        setShowSuccessMessage(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +100,14 @@ export default function LoginPage() {
 
       {/* Login Form */}
       <div className="w-full max-w-xl px-2 md:px-4">
+        {/* Success Message */}
+        {showSuccessMessage && (
+          <div className="mb-5 flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700">
+            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            <span className="text-sm">Registration successful! Please log in with your credentials.</span>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Error Message */}
           {error && (

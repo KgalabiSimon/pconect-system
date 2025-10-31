@@ -129,6 +129,15 @@ export const API_ENDPOINTS = {
     BY_PHONE: '/api/v1/visitors/by-phone',
   },
   
+  // Programmes
+  PROGRAMMES: {
+    LIST: '/api/v1/programmes/',
+    CREATE: '/api/v1/programmes/',
+    GET: (id: string) => `/api/v1/programmes/${id}`,
+    UPDATE: (id: string) => `/api/v1/programmes/${id}`,
+    DELETE: (id: string) => `/api/v1/programmes/${id}`,
+  },
+  
   // System
   SYSTEM: {
     ROOT: '/',

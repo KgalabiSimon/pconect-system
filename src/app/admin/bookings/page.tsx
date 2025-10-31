@@ -26,6 +26,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/api/useAuth";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 interface Booking {
   id: string;
@@ -45,6 +47,7 @@ interface Booking {
 
 export default function BookingManagementPage() {
   const router = useRouter();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([
     {
       id: "BK-001",
@@ -83,12 +86,23 @@ export default function BookingManagementPage() {
   const [filterDate, setFilterDate] = useState("");
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
 
-  useEffect(() => {
-    const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
-    if (!isAdminLoggedIn) {
-      router.push("/admin/login");
-    }
-  }, [router]);
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading booking management...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    router.push("/admin/login");
+    return null;
+  }
 
   const filteredBookings = bookings.filter((booking) => {
     const matchesSearch =
@@ -153,6 +167,7 @@ export default function BookingManagementPage() {
   };
 
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
@@ -342,5 +357,6 @@ export default function BookingManagementPage() {
         )}
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

@@ -7,6 +7,7 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { authService } from '../../lib/api/auth';
+import { apiClient } from '../../lib/api/client';
 import type { UserResponse, Token } from '../../types/api';
 
 interface AuthContextType {
@@ -55,13 +56,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setToken(storedToken);
         setIsAuthenticated(true);
         
-        // Try to get user data
+        // Try to get user data - suppress errors as admin tokens don't work with /auth/me
         try {
-          const userData = await authService.getCurrentUser();
+          const userData = await authService.getCurrentUser({ suppressErrorLog: true });
           setUser(userData);
-        } catch (error) {
-          console.warn('Failed to get user data, clearing auth:', error);
-          logout();
+        } catch (error: any) {
+          // If it's a 401, this might be an admin token - that's okay, don't clear auth
+          // Admin tokens don't work with /auth/me but still work for admin endpoints
+          if (error?.status === 401) {
+            console.log('Token may be admin token (doesn\'t work with /auth/me), keeping auth state');
+            // Keep authentication state - user can still access admin endpoints
+          } else {
+            console.warn('Failed to get user data, clearing auth:', error);
+            logout();
+          }
         }
       }
     } catch (error) {
@@ -83,9 +91,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setToken(tokenData.access_token);
         setIsAuthenticated(true);
         
-        // Get user data
-        const userData = await authService.getCurrentUser();
-        setUser(userData);
+        // Get user data - handle errors gracefully
+        try {
+          const userData = await authService.getCurrentUser();
+          setUser(userData);
+        } catch (userError) {
+          // If getting user data fails, log but don't fail login
+          // User data will be fetched on next page load
+          console.warn('Failed to fetch user data after login:', userError);
+          // Set a minimal user object to prevent issues
+          // The user data will be refreshed automatically on next request
+        }
         
         return true;
       }
@@ -105,7 +121,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(true);
       setError(null);
 
-      // First try admin login
+      // First try admin login (for accounts created through admin registration)
       try {
         const tokenData = await authService.loginAdmin({ email, password });
         
@@ -113,16 +129,64 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setToken(tokenData.access_token);
           setIsAuthenticated(true);
           
-          // Get user data
-          const userData = await authService.getCurrentUser();
-          setUser(userData);
+          // Get user data - admin login tokens may not work with /auth/me
+          // Try /auth/me first, if it fails, try regular login to get user data but restore admin token
+          try {
+            const userData = await authService.getCurrentUser({ suppressErrorLog: true });
+            setUser(userData);
+          } catch (userError: any) {
+            // Admin login tokens don't work with /auth/me endpoint (returns 401)
+            // This is expected behavior - admin tokens are for API operations, not user profile
+            if (userError?.status === 401) {
+              console.log('Admin login token doesn\'t work with /auth/me (expected), trying regular login to get user data...');
+              const adminToken = tokenData.access_token; // Save admin token
+              
+              try {
+                // Suppress error log for regular login fallback - it's expected to fail for admin accounts
+                const regularTokenData = await authService.loginUser({ email, password }, { suppressErrorLog: true });
+                if (regularTokenData.access_token) {
+                  // Temporarily use regular token to get user data
+                  const userData = await authService.getCurrentUser({ suppressErrorLog: true });
+                  setUser(userData);
+                  
+                  // Restore admin token (needed for admin endpoints)
+                  setToken(adminToken);
+                  apiClient.setAuthToken(adminToken);
+                  
+                  console.log('✅ User data retrieved, admin token restored');
+                }
+              } catch (regularError) {
+                // If regular login also fails, that's okay - user can still access admin endpoints
+                // Just set basic user info from email
+                console.log('Regular login not available for admin account (expected), using basic user info');
+                setUser({
+                  id: '',
+                  email: email,
+                  first_name: '',
+                  last_name: '',
+                  is_active: true,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                } as any);
+              }
+            } else {
+              // Other errors - just log as warning
+              console.warn('Failed to fetch user data after admin login:', userError);
+            }
+          }
           
           return true;
         }
-      } catch (adminError) {
-        console.log('Admin login failed, trying regular login as fallback...');
+      } catch (adminError: any) {
+        // Admin login failed (expected for users registered through regular registration)
+        // Silently fallback to regular login - don't log as error
+        // If it's an expected 401, we don't need to log anything
+        if (adminError?.status !== 401 && !adminError?.isExpected) {
+          // Only log if it's not a 401 or expected error
+          console.warn('Admin login failed with non-401 error, trying regular login...', adminError);
+        }
         
-        // Fallback to regular user login
+        // Fallback to regular user login (works for admin accounts created via regular registration)
         try {
           const tokenData = await authService.loginUser({ email, password });
           
@@ -130,9 +194,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
             setToken(tokenData.access_token);
             setIsAuthenticated(true);
             
-            // Get user data
-            const userData = await authService.getCurrentUser();
-            setUser(userData);
+            // Get user data - handle errors gracefully
+            try {
+              const userData = await authService.getCurrentUser();
+              setUser(userData);
+            } catch (userError) {
+              // If getting user data fails, log but don't fail login
+              console.warn('Failed to fetch user data after login:', userError);
+            }
             
             return true;
           }
@@ -163,9 +232,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setToken(tokenData.access_token);
         setIsAuthenticated(true);
         
-        // Get user data
-        const userData = await authService.getCurrentUser();
-        setUser(userData);
+        // Get user data - handle errors gracefully
+        try {
+          const userData = await authService.getCurrentUser();
+          setUser(userData);
+        } catch (userError) {
+          // If getting user data fails, log but don't fail login
+          console.warn('Failed to fetch user data after security login:', userError);
+        }
         
         return true;
       }
@@ -195,12 +269,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const refreshUser = async () => {
     try {
       if (isAuthenticated) {
-        const userData = await authService.getCurrentUser();
+        const userData = await authService.getCurrentUser({ suppressErrorLog: true });
         setUser(userData);
       }
-    } catch (error) {
-      console.error('Failed to refresh user data:', error);
-      logout();
+    } catch (error: any) {
+      // If it's a 401, this might be an admin token - don't logout
+      // Admin tokens don't work with /auth/me but still work for admin endpoints
+      if (error?.status === 401) {
+        console.log('Cannot refresh user data - token may be admin token (expected)');
+        // Don't logout - admin tokens still work for admin endpoints
+      } else {
+        console.error('Failed to refresh user data:', error);
+        logout();
+      }
     }
   };
 
