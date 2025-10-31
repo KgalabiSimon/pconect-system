@@ -3,78 +3,47 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Shield, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Shield, Eye, EyeOff } from "lucide-react";
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/hooks/api/useAuth";
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const { loginAdmin, isLoading, error, clearError, user, isAuthenticated } = useAuth();
-  
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [justLoggedIn, setJustLoggedIn] = useState(false);
 
-  // Verify admin role after login
-  useEffect(() => {
-    if (justLoggedIn && isAuthenticated && user) {
-      console.log('🔍 Admin login verification:', {
-        isAuthenticated: isAuthenticated,
-        userRole: user?.role || 'not set',
-        userId: user?.id,
-        email: user?.email,
-        name: user ? `${user.first_name} ${user.last_name}` : 'N/A',
-        is_active: user?.is_active
-      });
-      
-      // Check if user has admin role
-      if (user?.role === 'admin') {
-        console.log('✅ Admin role verified, redirecting to dashboard');
-      } else {
-        // User logged in but doesn't have admin role
-        console.warn('⚠️ User logged in but role is not "admin":', user?.role || 'not set');
-        console.log('📝 Note: API will enforce permissions on restricted endpoints');
-        console.log('📝 Some features may not be accessible (e.g., User Management requires admin role)');
-      }
-      
-      // Redirect to dashboard (API will enforce permissions)
-      router.push("/admin");
-      setJustLoggedIn(false);
-      setIsSubmitting(false);
-    }
-  }, [justLoggedIn, isAuthenticated, user, router]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (isSubmitting) return;
-    
-    setIsSubmitting(true);
-    clearError();
+
+    console.log("🔐 Admin login attempt...");
+
+    // Simple validation for demo
+    if (!email || !password) {
+      alert("Please enter email and password");
+      return;
+    }
 
     try {
-      const success = await loginAdmin(email, password);
-      
-      if (success) {
-        // Set flag to trigger useEffect for role verification
-        setJustLoggedIn(true);
-        // Note: isSubmitting will be reset after redirect or in useEffect
-      } else {
-        // Login failed - reset submitting state
-        setIsSubmitting(false);
-      }
-      // If login fails, error is handled by auth context - no need to log here
-      // The 401 from admin login is expected and handled gracefully
-    } catch (error: any) {
-      // Only log if it's not an expected 401 error
-      if (error?.status !== 401 && !error?.isExpected) {
-        console.error("Admin login error:", error);
-      }
-      setIsSubmitting(false);
+      // Store admin session
+      sessionStorage.setItem("adminLoggedIn", "true");
+      sessionStorage.setItem("adminEmail", email);
+      sessionStorage.setItem("adminName", "Administrator");
+
+      console.log("✅ Admin session created");
+      console.log("Email:", email);
+      console.log("Session stored:", sessionStorage.getItem("adminLoggedIn"));
+
+      // Give a small delay to ensure storage is complete
+      setTimeout(() => {
+        console.log("🚀 Redirecting to admin dashboard...");
+        router.push("/admin");
+      }, 100);
+
+    } catch (error) {
+      console.error("❌ Login error:", error);
+      alert("Failed to login. Please try again.");
     }
   };
 
@@ -114,14 +83,6 @@ export default function AdminLoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Error Message */}
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <span className="text-sm">{error}</span>
-            </div>
-          )}
-
           {/* Email Input */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Admin Email</label>
@@ -132,7 +93,6 @@ export default function AdminLoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="h-12 text-base border-gray-300"
               required
-              disabled={isSubmitting}
             />
           </div>
 
@@ -147,13 +107,11 @@ export default function AdminLoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="h-12 text-base border-gray-300 pr-12"
                 required
-                disabled={isSubmitting}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                disabled={isSubmitting}
               >
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
@@ -163,17 +121,9 @@ export default function AdminLoginPage() {
           {/* Login Button */}
           <Button
             type="submit"
-            className="w-full h-12 text-base font-semibold bg-[#265e91] hover:bg-[#1e4a6f] disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isSubmitting || isLoading}
+            className="w-full h-12 text-base font-semibold bg-[#265e91] hover:bg-[#1e4a6f]"
           >
-            {isSubmitting ? (
-              <div className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                <span>Accessing...</span>
-              </div>
-            ) : (
-              "Login to Admin Portal"
-            )}
+            Login to Admin Portal
           </Button>
         </form>
 

@@ -19,12 +19,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { useAuth } from "@/hooks/api/useAuth";
-import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [stats, setStats] = useState({
     totalUsers: 156,
@@ -40,17 +37,29 @@ export default function AdminDashboardPage() {
   });
 
   useEffect(() => {
-    // Check if user is authenticated
-    if (!authLoading && !isAuthenticated) {
-      console.log("❌ Dashboard: Not authenticated, redirecting to login");
+    // Check if admin is logged in
+    console.log("🔍 Dashboard: Checking admin authentication...");
+
+    try {
+      const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
+      console.log("🔐 Dashboard: Admin status =", isAdminLoggedIn);
+
+      if (!isAdminLoggedIn) {
+        console.log("❌ Dashboard: No session, redirecting to login");
+        router.push("/admin/login");
+      } else {
+        console.log("✅ Dashboard: Admin authenticated");
+      }
+    } catch (error) {
+      console.error("❌ Dashboard: Auth check error:", error);
       router.push("/admin/login");
-    } else if (isAuthenticated) {
-      console.log("✅ Dashboard: User authenticated");
     }
-  }, [isAuthenticated, authLoading, router]);
+  }, [router]);
 
   const handleLogout = () => {
-    logout();
+    sessionStorage.removeItem("adminLoggedIn");
+    sessionStorage.removeItem("adminEmail");
+    sessionStorage.removeItem("adminName");
     router.push("/admin/login");
   };
 
@@ -64,26 +73,8 @@ export default function AdminDashboardPage() {
     { name: "Reports", href: "/admin/reports", icon: Download },
   ];
 
-  // Show loading state while checking authentication
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading admin dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Don't render if not authenticated (redirect is handled in useEffect)
-  if (!isAuthenticated) {
-    return null;
-  }
-
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="px-4 py-3">
@@ -210,7 +201,7 @@ export default function AdminDashboardPage() {
           {/* Page Title */}
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-gray-900">Dashboard Overview</h2>
-            <p className="text-gray-600 mt-1">Welcome to the P-Connect admin portal, {user?.first_name || 'Admin'}!</p>
+            <p className="text-gray-600 mt-1">Welcome to the P-Connect admin portal</p>
           </div>
 
           {/* Stats Grid */}
@@ -343,7 +334,6 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
       </main>
-      </div>
-    </ProtectedRoute>
+    </div>
   );
 }

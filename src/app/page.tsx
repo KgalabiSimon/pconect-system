@@ -7,14 +7,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Menu, X, Bell, LogIn, Calendar, BarChart3, HelpCircle, LogOut } from "lucide-react";
-import { useAuth } from "@/hooks/api/useAuth";
-import { LogoutButton } from "@/components/LogoutButton";
 
 export default function Home() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showNotification, setShowNotification] = useState(true);
+  const [userName, setUserName] = useState("");
   const [upcomingBookings, setUpcomingBookings] = useState<Array<{
     id: string;
     space: string;
@@ -26,34 +25,36 @@ export default function Home() {
   const [hasActiveBooking, setHasActiveBooking] = useState(false);
 
   useEffect(() => {
-    // Redirect to login if not authenticated
-    if (!isLoading && !isAuthenticated) {
+    // Check if user is logged in (simple check using sessionStorage)
+    const loggedIn = sessionStorage.getItem("isLoggedIn");
+    if (!loggedIn) {
       router.push("/login");
-      return;
-    }
+    } else {
+      setIsLoggedIn(true);
 
-    if (isAuthenticated && user) {
+      // Get user's name from sessionStorage
+      const firstName = sessionStorage.getItem("firstName") || "";
+      const lastName = sessionStorage.getItem("lastName") || "";
+      const fullName = `${firstName} ${lastName}`.trim();
+      setUserName(fullName || "User");
+
       // Check for active check-in QR code
       const today = new Date().toISOString().split('T')[0];
-      const qrCodeKey = `qr_checkin_${user.email}_${today}`;
-      const qrData = localStorage.getItem(qrCodeKey);
+      const userEmail = sessionStorage.getItem("email") || "user@example.com";
+      const qrCodeKey = `qr_checkin_${userEmail}_${today}`;
+      const qrData = sessionStorage.getItem(qrCodeKey);
 
       if (qrData) {
         const now = new Date();
         const midnight = new Date(now);
         midnight.setHours(23, 59, 59, 999);
-        
-        const qrTimestamp = new Date(JSON.parse(qrData).timestamp);
-        
-        if (qrTimestamp < midnight) {
+        if (now < midnight) {
           setHasActiveCheckIn(true);
-        } else {
-          localStorage.removeItem(qrCodeKey);
         }
       }
 
       // Check if notification was dismissed today
-      const dismissedDate = localStorage.getItem("notificationDismissedDate");
+      const dismissedDate = sessionStorage.getItem("notificationDismissedDate");
       if (dismissedDate === today) {
         setShowNotification(false);
       } else {
@@ -63,7 +64,7 @@ export default function Home() {
       // Check for upcoming bookings
       checkUpcomingBookings(today);
     }
-  }, [isAuthenticated, isLoading, user, router]);
+  }, [router]);
 
   const checkUpcomingBookings = (todayStr: string) => {
     // In real app, this would fetch from API
@@ -107,12 +108,13 @@ export default function Home() {
     setShowNotification(false);
     // Save dismissal state with today's date so it shows again tomorrow
     const today = new Date().toISOString().split('T')[0];
-    localStorage.setItem("notificationDismissedDate", today);
+    sessionStorage.setItem("notificationDismissedDate", today);
   };
 
   const handleLogout = () => {
-    logout();
+    sessionStorage.removeItem("isLoggedIn");
     setIsMenuOpen(false);
+    router.push("/login");
   };
 
   const sideMenuItems = [
@@ -182,16 +184,8 @@ export default function Home() {
     },
   ];
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null; // Don't render anything while checking auth status
+  if (!isLoggedIn) {
+    return null; // Don't render anything while checking login status
   }
 
   return (
@@ -209,7 +203,7 @@ export default function Home() {
         {/* Profile Section with Name */}
         <Link href="/profile" className="flex items-center gap-2 md:gap-3 p-2 rounded-full hover:bg-primary/5 transition-colors active:scale-95">
           <span className="text-sm md:text-base font-medium text-gray-700 max-w-[120px] md:max-w-[200px] truncate">
-            {user?.first_name} {user?.last_name}
+            {userName}
           </span>
           <div className="p-1.5 rounded-full bg-primary/10">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
@@ -373,13 +367,14 @@ export default function Home() {
 
       {/* Logout Button */}
       <div className="w-full max-w-3xl px-4 md:px-8 mb-4 md:mb-5">
-        <LogoutButton
+        <Button
+          onClick={handleLogout}
           variant="outline"
           size="lg"
           className="w-full text-sm md:text-lg font-bold border-2 border-primary/60 text-primary hover:bg-primary/5 hover:border-primary transition-all rounded-xl md:rounded-2xl h-12 md:h-16 tracking-wide"
         >
           LOGOUT
-        </LogoutButton>
+        </Button>
       </div>
 
       {/* Client Badge */}

@@ -25,8 +25,6 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { useAuth } from "@/hooks/api/useAuth";
-import ProtectedRoute from "@/components/ProtectedRoute";
 
 interface LaptopRecord {
   id: string;
@@ -52,7 +50,6 @@ interface LaptopRecord {
 
 export default function LaptopsPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
 
   const [laptopRecords, setLaptopRecords] = useState<LaptopRecord[]>([
@@ -247,8 +244,7 @@ export default function LaptopsPage() {
     }
   };
 
-  // Show loading state while checking authentication
-  if (authLoading || isLoading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -259,14 +255,7 @@ export default function LaptopsPage() {
     );
   }
 
-  // Redirect to login if not authenticated
-  if (!isAuthenticated) {
-    router.push("/admin/login");
-    return null;
-  }
-
   return (
-    <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
@@ -553,6 +542,5 @@ export default function LaptopsPage() {
         )}
       </div>
     </div>
-    </ProtectedRoute>
   );
 }

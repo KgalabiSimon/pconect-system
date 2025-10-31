@@ -9,24 +9,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Camera, Save, User, AlertCircle } from "lucide-react";
+import { ArrowLeft, Camera, Save, User } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/api/useAuth";
-import { useUsers } from "@/hooks/api/useUsers";
-import { useBuildingSelection } from "@/hooks/api/useBuildingSelection";
-import { useProgrammeSelection } from "@/hooks/api/useProgrammeSelection";
-import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user: authUser, isAuthenticated, isLoading: authLoading, refreshUser } = useAuth();
-  const { updateProfile, updateUser, isUpdating, error, clearError } = useUsers();
-  const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelection();
-  const { programmeOptions, isLoading: programmesLoading } = useProgrammeSelection();
-  
   const [isEditing, setIsEditing] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -38,106 +28,75 @@ export default function ProfilePage() {
   const [email, setEmail] = useState("");
   const [selfieData, setSelfieData] = useState<string | null>(null);
 
+  // Building data
+  const buildings = [
+    "The Department of Science, Technology and Innovation",
+    "Building 41",
+    "Building 42",
+  ];
+
+  // Programme data
+  const programmes = [
+    "Programme 1A",
+    "Programme 1B",
+    "Programme 2",
+    "Programme 3",
+    "Programme 4",
+    "Programme 5",
+    "Programme 6",
+  ];
+
   useEffect(() => {
-    // Load user data from Azure API
-    if (authUser) {
-      setFirstName(authUser.first_name || "");
-      setLastName(authUser.last_name || "");
-      setPhone(authUser.phone || "");
-      setBuilding(authUser.building_id || "");
-      setProgramme(authUser.programme_id || "");
-      setLaptopModel(authUser.laptop_model || "");
-      setAssetNumber(authUser.laptop_asset_number || "");
-      setEmail(authUser.email || "");
-      setSelfieData(authUser.photo_url || null);
+    // Check if user is logged in
+    const loggedIn = sessionStorage.getItem("isLoggedIn");
+    if (!loggedIn) {
+      router.push("/login");
+      return;
     }
-  }, [authUser]);
 
-  const handleSave = async () => {
-    try {
-      clearError();
-      
-      if (!authUser?.id) {
-        alert("User ID not found. Please log in again.");
-        return;
-      }
+    // Load user data from sessionStorage (in real app, would fetch from API)
+    const storedFirstName = sessionStorage.getItem("firstName") || "John";
+    const storedLastName = sessionStorage.getItem("lastName") || "Doe";
+    const storedPhone = sessionStorage.getItem("phone") || "+27 123 456 789";
+    const storedBuilding = sessionStorage.getItem("building") || "Building 41";
+    const storedProgramme = sessionStorage.getItem("programme") || "Programme 1A";
+    const storedLaptopModel = sessionStorage.getItem("laptopModel") || "Dell Latitude";
+    const storedAssetNumber = sessionStorage.getItem("assetNumber") || "DST-001234";
+    const storedEmail = sessionStorage.getItem("email") || "user@example.com";
+    const storedSelfie = sessionStorage.getItem("selfieImage");
 
-      // The profile endpoint only accepts: id, last_name, email
-      // The user update endpoint accepts: first_name, last_name, email, password, is_active, role
-      // For phone, building_id, programme_id, laptop_model, laptop_asset_number,
-      // we need to check what the profile endpoint actually accepts
-      
-      // First, update name fields using the user update endpoint
-      const userUpdateData = {
-        first_name: firstName,
-        last_name: lastName,
-      };
+    setFirstName(storedFirstName);
+    setLastName(storedLastName);
+    setPhone(storedPhone);
+    setBuilding(storedBuilding);
+    setProgramme(storedProgramme);
+    setLaptopModel(storedLaptopModel);
+    setAssetNumber(storedAssetNumber);
+    setEmail(storedEmail);
+    setSelfieData(storedSelfie);
+  }, [router]);
 
-      console.log("Updating user with data:", userUpdateData);
-      let updatedUser = await updateUser(authUser.id, userUpdateData);
-      
-      if (!updatedUser) {
-        alert("Failed to update name. Please try again.");
-        return;
-      }
+  const handleSave = () => {
+    // Save updated data to sessionStorage (in real app, would send to API)
+    sessionStorage.setItem("firstName", firstName);
+    sessionStorage.setItem("lastName", lastName);
+    sessionStorage.setItem("phone", phone);
+    sessionStorage.setItem("building", building);
+    sessionStorage.setItem("programme", programme);
+    sessionStorage.setItem("laptopModel", laptopModel);
+    sessionStorage.setItem("assetNumber", assetNumber);
 
-      console.log("User name updated successfully, received:", updatedUser);
-
-      // Then try to update other fields using the profile endpoint
-      // Note: The API may not accept all these fields, but we'll try
-      const profileData = {
-        id: authUser.id,
-        last_name: lastName, // Include last_name here in case it didn't update above
-        phone: phone || undefined,
-        building_id: building || undefined,
-        programme_id: programme || undefined,
-        laptop_model: laptopModel || undefined,
-        laptop_asset_number: assetNumber || undefined,
-      };
-
-      console.log("Updating profile with additional data:", profileData);
-      updatedUser = await updateProfile(profileData);
-      
-      if (updatedUser) {
-        console.log("Profile updated successfully, received:", updatedUser);
-      } else {
-        console.warn("Profile update for additional fields returned null, but name was updated");
-      }
-
-      // Refresh the auth context to get the updated user data
-      await refreshUser();
-      setIsEditing(false);
-      alert("Profile updated successfully!");
-    } catch (error: any) {
-      console.error("Error updating profile:", error);
-      const errorMessage = error?.message || error?.data?.detail || "Failed to update profile. Please try again.";
-      alert(`Error: ${errorMessage}`);
-    }
+    setIsEditing(false);
+    alert("Profile updated successfully!");
   };
 
   const handleRetakeSelfie = () => {
     router.push("/register/camera");
   };
 
-  // Show loading state while checking authentication
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  // Redirect to login if not authenticated
-  if (!isAuthenticated) {
-    router.push("/login");
-    return null;
-  }
-
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-background">
-        {/* Header */}
+    <div className="min-h-screen bg-background">
+      {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-primary p-1 -ml-1 active:opacity-60">
@@ -159,32 +118,12 @@ export default function ProfilePage() {
             onClick={handleSave}
             size="sm"
             className="bg-primary text-white font-semibold flex items-center gap-1"
-            disabled={isUpdating}
           >
-            {isUpdating ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                Save
-              </>
-            )}
+            <Save className="w-4 h-4" />
+            Save
           </Button>
         )}
       </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="mx-4 md:mx-6 mt-4">
-          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <span className="text-sm">{error}</span>
-          </div>
-        </div>
-      )}
 
       {/* Content */}
       <div className="p-4 md:p-6 max-w-2xl mx-auto">
@@ -290,17 +229,11 @@ export default function ProfilePage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {buildingsLoading ? (
-                  <SelectItem value="loading" disabled>
-                    Loading buildings...
+                {buildings.map((b) => (
+                  <SelectItem key={b} value={b}>
+                    {b}
                   </SelectItem>
-                ) : (
-                  buildingOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -312,24 +245,14 @@ export default function ProfilePage() {
             </label>
             <Select value={programme} onValueChange={setProgramme} disabled={!isEditing}>
               <SelectTrigger className="h-12 md:h-14 text-base border-gray-300">
-                <SelectValue placeholder={programmesLoading ? "Loading programmes..." : "Select programme"} />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {programmesLoading ? (
-                  <SelectItem value="loading" disabled>
-                    Loading programmes...
+                {programmes.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
                   </SelectItem>
-                ) : programmeOptions.length === 0 ? (
-                  <SelectItem value="none" disabled>
-                    No programmes available
-                  </SelectItem>
-                ) : (
-                  programmeOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -376,7 +299,6 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
-      </div>
-    </ProtectedRoute>
+    </div>
   );
 }

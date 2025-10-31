@@ -9,37 +9,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, BarChart3, AlertCircle } from "lucide-react";
+import { ArrowLeft, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { useAuth } from "@/hooks/api/useAuth";
-import { useCheckIns } from "@/hooks/api/useCheckIns";
-import { useBuildings } from "@/hooks/api/useBuildings";
-import ProtectedRoute from "@/components/ProtectedRoute";
-import type { CheckInResponse } from "@/types/api";
 
 export default function CheckInPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { buildings, isLoading: buildingsLoading } = useBuildings();
-  const { 
-    checkIn, 
-    generateQRCode, 
-    getActiveCheckIns,
-    isLoading: checkInLoading, 
-    error, 
-    clearError 
-  } = useCheckIns();
-  
   const [selectedFloor, setSelectedFloor] = useState("");
   const [selectedBlock, setSelectedBlock] = useState("");
   const [hasLaptop, setHasLaptop] = useState("");
   const [laptopName, setLaptopName] = useState("");
   const [assetNumber, setAssetNumber] = useState("");
   const [checking, setChecking] = useState(true);
-  const [hasActiveCheckIn, setHasActiveCheckIn] = useState(false);
-  const [activeCheckIn, setActiveCheckIn] = useState<CheckInResponse | null>(null);
 
   // Floor and Block data structure
   const floorBlockData: Record<string, string[]> = {
@@ -49,53 +31,44 @@ export default function CheckInPage() {
     "Third Floor": ["Block J", "Block K", "Block L"],
   };
 
-  // Check for existing active check-in on mount
+  // Check for existing active QR code on mount
   useEffect(() => {
-    const checkActiveCheckIn = async () => {
-      if (!user?.id) {
-        setChecking(false);
-        return;
+    const checkActiveQRCode = () => {
+      const today = new Date().toISOString().split('T')[0];
+      const userEmail = sessionStorage.getItem("email") || "user@example.com";
+      const qrCodeKey = `qr_checkin_${userEmail}_${today}`;
+
+      // Check if QR code exists for today
+      const qrData = sessionStorage.getItem(qrCodeKey);
+      const employeeId = sessionStorage.getItem(`${qrCodeKey}_employeeId`);
+      const createdAt = sessionStorage.getItem(`${qrCodeKey}_createdAt`);
+
+      if (qrData && employeeId && createdAt) {
+        // Check if QR code is still valid (before midnight)
+        const now = new Date();
+        const midnight = new Date(now);
+        midnight.setHours(23, 59, 59, 999);
+
+        if (now < midnight) {
+          // QR code is still valid, redirect to QR page
+          router.push(`/checkin/qr?data=${qrData}&employeeId=${employeeId}&date=${today}`);
+          return;
+        }
       }
 
-      try {
-        const activeCheckIns = await getActiveCheckIns(user.id);
-        if (activeCheckIns.length > 0) {
-          const activeCheckIn = activeCheckIns[0];
-          setHasActiveCheckIn(true);
-          setActiveCheckIn(activeCheckIn);
-          
-          // Redirect to QR page if QR code exists
-          if (activeCheckIn.qr_code) {
-            router.push(`/checkin/qr?data=${activeCheckIn.qr_code}&employeeId=${activeCheckIn.id}&date=${activeCheckIn.check_in_time.split('T')[0]}`);
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('Error checking active check-ins:', error);
-      } finally {
-        setChecking(false);
-      }
+      setChecking(false);
     };
 
-    if (isAuthenticated && user) {
-      checkActiveCheckIn();
-    } else {
-      setChecking(false);
-    }
-  }, [isAuthenticated, user, getActiveCheckIns, router]);
+    checkActiveQRCode();
+  }, [router]);
 
   const handleFloorChange = (value: string) => {
     setSelectedFloor(value);
     setSelectedBlock(""); // Reset block when floor changes
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!user?.id) {
-      alert("User not authenticated");
-      return;
-    }
 
     // Validate all required fields
     if (!selectedFloor) {
@@ -125,54 +98,81 @@ export default function CheckInPage() {
       }
     }
 
-    try {
-      clearError();
-      
-      // Create check-in data
-      const checkInData = {
-        user_id: user.id,
-        building_id: user.building_id || buildings[0]?.id || "", // Use user's building or first available
-        floor: selectedFloor,
-        block: selectedBlock,
-        laptop_model: hasLaptop === "yes" ? laptopName : undefined,
-        laptop_asset_number: hasLaptop === "yes" ? assetNumber : undefined,
-        purpose: "Work",
+    // Get today's date as key
+    const today = new Date().toISOString().split('T')[0];
+    const userEmail = sessionStorage.getItem("email") || "user@example.com";
+    const qrCodeKey = `qr_checkin_${userEmail}_${today}`;
+
+    // Check if QR code already exists for today
+    let qrData = sessionStorage.getItem(qrCodeKey);
+    let employeeId = sessionStorage.getItem(`${qrCodeKey}_employeeId`);
+
+    // If no QR code exists for today, create new one
+    if (!qrData) {
+      const generateUUID = () => {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
       };
 
-      // Create check-in
-      const newCheckIn = await checkIn(checkInData);
-      
-      if (newCheckIn) {
-        // Generate QR code
-        const qrData = {
-          user_id: user.id,
-          building_id: checkInData.building_id,
-          floor: selectedFloor,
-          block: selectedBlock,
-          laptop_model: checkInData.laptop_model,
-          laptop_asset_number: checkInData.laptop_asset_number,
-        };
+      qrData = generateUUID();
+      employeeId = generateUUID();
 
-        const qrResult = await generateQRCode(qrData);
-        
-        if (qrResult) {
-          // Redirect to QR page
-          const today = new Date().toISOString().split('T')[0];
-          router.push(`/checkin/qr?data=${qrResult.qr_code}&employeeId=${newCheckIn.id}&date=${today}`);
-        } else {
-          alert("Check-in created but failed to generate QR code");
-        }
-      } else {
-        alert("Failed to create check-in. Please try again.");
-      }
-    } catch (error) {
-      console.error("Check-in error:", error);
-      alert("Failed to create check-in. Please try again.");
+      // Store QR code for today
+      sessionStorage.setItem(qrCodeKey, qrData);
+      sessionStorage.setItem(`${qrCodeKey}_employeeId`, employeeId);
+      sessionStorage.setItem(`${qrCodeKey}_createdAt`, new Date().toISOString());
+
+      // Store mapping between employeeId and email for security scanner
+      sessionStorage.setItem(`employeeId_${employeeId}`, userEmail);
     }
+
+    // Save check-in details
+    sessionStorage.setItem(`${qrCodeKey}_floor`, selectedFloor);
+    sessionStorage.setItem(`${qrCodeKey}_block`, selectedBlock);
+    sessionStorage.setItem(`${qrCodeKey}_hasLaptop`, hasLaptop);
+    if (hasLaptop === "yes") {
+      sessionStorage.setItem(`${qrCodeKey}_laptopName`, laptopName);
+      sessionStorage.setItem(`${qrCodeKey}_assetNumber`, assetNumber);
+    }
+
+    // Store all user data in localStorage for security scanner access
+    const firstName = sessionStorage.getItem("firstName") || "Unknown";
+    const lastName = sessionStorage.getItem("lastName") || "User";
+    const phone = sessionStorage.getItem("phone") || "N/A";
+    const building = sessionStorage.getItem("building") || "Unknown";
+    const laptopModel = sessionStorage.getItem("laptopModel") || "N/A";
+    const regAssetNumber = sessionStorage.getItem("assetNumber") || "N/A";
+
+    const checkinData = {
+      employeeId: employeeId,
+      email: userEmail,
+      firstName: firstName,
+      lastName: lastName,
+      phone: phone,
+      building: building,
+      floor: selectedFloor,
+      block: selectedBlock,
+      hasLaptop: hasLaptop,
+      laptop: hasLaptop === "yes" ? (laptopName || laptopModel) : "No laptop",
+      assetNumber: hasLaptop === "yes" ? (assetNumber || regAssetNumber) : "N/A",
+      date: today,
+      createdAt: new Date().toISOString()
+    };
+
+    // Store in localStorage so security scanner can access it
+    console.log("Storing check-in data to localStorage:", checkinData);
+    localStorage.setItem(`checkin_${employeeId}`, JSON.stringify(checkinData));
+    console.log("Stored successfully. Key:", `checkin_${employeeId}`);
+
+    // Navigate to QR code page with query parameters
+    router.push(`/checkin/qr?data=${qrData}&employeeId=${employeeId}&date=${today}`);
   };
 
   // Show loading while checking for active QR code
-  if (checking || authLoading) {
+  if (checking) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -183,30 +183,8 @@ export default function CheckInPage() {
     );
   }
 
-  // Redirect to login if not authenticated
-  if (!isAuthenticated) {
-    router.push("/login");
-    return null;
-  }
-
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-background">
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 px-4 py-3 mx-4 mt-4 rounded-lg">
-            <div className="flex items-center gap-2 text-red-700">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <span className="text-sm">{error}</span>
-              <button
-                onClick={clearError}
-                className="ml-auto text-red-500 hover:text-red-700"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        )}
+    <div className="min-h-screen bg-background">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
         <Link href="/" className="text-primary p-1 -ml-1 active:opacity-60">
@@ -309,9 +287,8 @@ export default function CheckInPage() {
           <Button
             type="submit"
             className="w-full h-12 md:h-14 text-base md:text-lg font-semibold bg-primary hover:bg-primary/90 text-white rounded-lg mt-2"
-            disabled={checkInLoading}
           >
-            {checkInLoading ? "Creating Check-in..." : "CHECK IN"}
+            CHECK IN
           </Button>
         </form>
 
@@ -324,6 +301,5 @@ export default function CheckInPage() {
         </Link>
       </div>
     </div>
-    </ProtectedRoute>
   );
 }

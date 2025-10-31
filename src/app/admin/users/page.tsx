@@ -19,36 +19,78 @@ import {
   Eye,
   Filter,
   Download,
-  X,
-  AlertCircle
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { useAuth } from "@/hooks/api/useAuth";
-import { useUsers } from "@/hooks/api/useUsers";
-import { useBuildingSelection } from "@/hooks/api/useBuildingSelection";
-import ProtectedRoute from "@/components/ProtectedRoute";
-import type { UserResponse } from "@/types/api";
 
-// Using UserResponse from API types instead of local interface
+interface User {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  building: string;
+  programme: string;
+  floor?: string;
+  block?: string;
+  laptop: string;
+  assetNumber: string;
+  createdAt: string;
+  totalCheckIns: number;
+}
 
 export default function UserManagementPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelection();
-  const {
-    users,
-    isLoading,
-    error,
-    loadUsers,
-    createUser,
-    updateUser,
-    deleteUser,
-    getUserCount,
-    clearError,
-    isUpdating
-  } = useUsers({ initialLoad: true });
+  const [isLoading, setIsLoading] = useState(true);
+  const [users, setUsers] = useState<User[]>([
+    {
+      id: "USR-001",
+      firstName: "John",
+      lastName: "Doe",
+      email: "john.doe@example.com",
+      phone: "+27 82 123 4567",
+      building: "Building 41",
+      programme: "Programme 1A",
+      floor: "Ground Floor",
+      block: "Block A",
+      laptop: "Dell Latitude 5420",
+      assetNumber: "DST-001",
+      createdAt: "2025-09-15",
+      totalCheckIns: 45
+    },
+    {
+      id: "USR-002",
+      firstName: "Sarah",
+      lastName: "Williams",
+      email: "sarah.w@example.com",
+      phone: "+27 83 987 6543",
+      building: "Building 42",
+      programme: "Programme 2",
+      floor: "First Floor",
+      block: "Block D",
+      laptop: "HP EliteBook 840",
+      assetNumber: "DST-002",
+      createdAt: "2025-08-20",
+      totalCheckIns: 62
+    },
+    {
+      id: "USR-003",
+      firstName: "Mike",
+      lastName: "Johnson",
+      email: "mike.j@example.com",
+      phone: "+27 84 555 1234",
+      building: "DSTI",
+      programme: "Programme 1B",
+      floor: "Ground Floor",
+      block: "Block B",
+      laptop: "Lenovo ThinkPad X1",
+      assetNumber: "DST-003",
+      createdAt: "2025-10-01",
+      totalCheckIns: 28
+    },
+  ]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterBuilding, setFilterBuilding] = useState("");
@@ -57,7 +99,7 @@ export default function UserManagementPage() {
   const [filterBlock, setFilterBlock] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<UserResponse | null>(null);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   // Form state for add/edit
   const [formData, setFormData] = useState({
@@ -74,68 +116,81 @@ export default function UserManagementPage() {
   });
 
   useEffect(() => {
-    // Load users when component mounts
-    if (isAuthenticated) {
-      loadUsers();
-      getUserCount();
-    }
-  }, [isAuthenticated, loadUsers, getUserCount]);
+    const checkAuth = () => {
+      try {
+        console.log("🔍 Checking admin authentication...");
 
-  // Handle search and filtering
-  useEffect(() => {
-    const searchParams = {
-      search: searchTerm || undefined,
-      building_id: filterBuilding || undefined,
-      programme_id: filterProgramme || undefined,
+        // Check if we're in browser environment
+        if (typeof window === "undefined") {
+          console.log("⚠️ Not in browser environment");
+          return;
+        }
+
+        const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
+        console.log("🔐 Admin logged in status:", isAdminLoggedIn);
+
+        if (!isAdminLoggedIn) {
+          console.log("❌ No admin session found, redirecting to login...");
+          router.push("/admin/login");
+        } else {
+          console.log("✅ Admin authenticated, loading user management page");
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error("❌ Auth check error:", error);
+        alert("Authentication error. Please try logging in again.");
+        router.push("/admin/login");
+      }
     };
 
-    // Only search if we have search criteria or filters
-    if (searchTerm || filterBuilding || filterProgramme) {
-      loadUsers(searchParams);
-    } else if (isAuthenticated) {
-      // Load all users if no filters
-      loadUsers();
-    }
-  }, [searchTerm, filterBuilding, filterProgramme, loadUsers, isAuthenticated]);
+    // Small delay to ensure sessionStorage is accessible
+    const timer = setTimeout(() => {
+      checkAuth();
+    }, 100);
 
-  // Since we're using Azure API, filtering is done server-side
-  // We can still do client-side filtering for additional UI features
+    return () => clearTimeout(timer);
+  }, [router]);
+
   const filteredUsers = users.filter((user) => {
-    const matchesFloor = !filterFloor || filterFloor === "all" || user.floor_id === filterFloor;
-    const matchesBlock = !filterBlock || filterBlock === "all" || user.block_id === filterBlock;
-    
-    return matchesFloor && matchesBlock;
+    const matchesSearch =
+      user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.phone.includes(searchTerm);
+
+    const matchesBuilding = !filterBuilding || filterBuilding === "all" || user.building === filterBuilding;
+    const matchesProgramme = !filterProgramme || filterProgramme === "all" || user.programme === filterProgramme;
+    const matchesFloor = !filterFloor || filterFloor === "all" || user.floor === filterFloor;
+    const matchesBlock = !filterBlock || filterBlock === "all" || user.block === filterBlock;
+
+    return matchesSearch && matchesBuilding && matchesProgramme && matchesFloor && matchesBlock;
   });
 
-  const handleDeleteUser = async (userId: string) => {
+  const handleDeleteUser = (userId: string) => {
     try {
       if (confirm("Are you sure you want to delete this user?")) {
-        const success = await deleteUser(userId);
-        if (success) {
-          alert("User deleted successfully!");
-        } else {
-          alert("Failed to delete user. Please try again.");
-        }
+        setUsers(users.filter((u) => u.id !== userId));
+        alert("User deleted successfully");
       }
     } catch (error) {
-      console.error("Error deleting user:", error);
+      console.error("Delete error:", error);
       alert("Failed to delete user. Please try again.");
     }
   };
 
-  const handleEditUser = (user: UserResponse) => {
+  const handleEditUser = (user: User) => {
     setSelectedUser(user);
     setFormData({
-      firstName: user.first_name || "",
-      lastName: user.last_name || "",
-      email: user.email || "",
-      phone: user.phone || "",
-      building: user.building_id || "",
-      programme: user.programme || "",
-      floor: user.floor_id || "",
-      block: user.block_id || "",
-      laptop: user.laptop_model || "",
-      assetNumber: user.laptop_asset_number || "",
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: user.phone,
+      building: user.building,
+      programme: user.programme,
+      floor: user.floor || "",
+      block: user.block || "",
+      laptop: user.laptop,
+      assetNumber: user.assetNumber,
     });
     setShowEditModal(true);
   };
@@ -264,26 +319,7 @@ export default function UserManagementPage() {
     }
   };
 
-  // Show loading state while checking authentication
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 mb-4">Checking authentication...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Redirect to login if not authenticated
-  if (!isAuthenticated) {
-    router.push("/admin/login");
-    return null;
-  }
-
-  // Show loading only if not an error (error state should show message instead)
-  if (isLoading && !error) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -300,34 +336,9 @@ export default function UserManagementPage() {
   }
 
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-500 px-6 py-4 mx-auto max-w-7xl mt-4">
-            <div className="flex items-center gap-3 text-red-800">
-              <AlertCircle className="w-6 h-6 flex-shrink-0 text-red-600" />
-              <div className="flex-1">
-                <p className="font-medium text-base">{error}</p>
-                {error.includes('permission') && (
-                  <p className="text-sm text-red-700 mt-1">
-                    Your account does not have access to this feature. If you believe this is an error, please contact your system administrator.
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={clearError}
-                className="text-red-500 hover:text-red-700 p-1 rounded"
-                title="Dismiss"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/admin">
@@ -385,17 +396,9 @@ export default function UserManagementPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Buildings</SelectItem>
-                {buildingsLoading ? (
-                  <SelectItem value="loading" disabled>
-                    Loading buildings...
-                  </SelectItem>
-                ) : (
-                  buildingOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
+                <SelectItem value="Building 41">Building 41</SelectItem>
+                <SelectItem value="Building 42">Building 42</SelectItem>
+                <SelectItem value="DSTI">DSTI Building</SelectItem>
               </SelectContent>
             </Select>
 
@@ -521,7 +524,7 @@ export default function UserManagementPage() {
                     <td className="px-4 py-4">
                       <div>
                         <div className="font-medium text-gray-900">
-                          {user.first_name} {user.last_name}
+                          {user.firstName} {user.lastName}
                         </div>
                         <div className="text-sm text-gray-600">{user.id}</div>
                       </div>
@@ -533,14 +536,14 @@ export default function UserManagementPage() {
                       </div>
                     </td>
                     <td className="px-4 py-4">
-                      <span className="text-sm text-gray-900">{user.building_id}</span>
+                      <span className="text-sm text-gray-900">{user.building}</span>
                     </td>
                     <td className="px-4 py-4">
                       <span className="text-sm text-gray-900">{user.programme}</span>
                     </td>
                     <td className="px-4 py-4">
                       <span className="text-sm font-semibold text-blue-600">
-                        {user.check_in_count || 0}
+                        {user.totalCheckIns}
                       </span>
                     </td>
                     <td className="px-4 py-4">
@@ -672,17 +675,9 @@ export default function UserManagementPage() {
                       <SelectValue placeholder="Select building" />
                     </SelectTrigger>
                     <SelectContent>
-                      {buildingsLoading ? (
-                        <SelectItem value="loading" disabled>
-                          Loading buildings...
-                        </SelectItem>
-                      ) : (
-                        buildingOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))
-                      )}
+                      <SelectItem value="Building 41">Building 41</SelectItem>
+                      <SelectItem value="Building 42">Building 42</SelectItem>
+                      <SelectItem value="DSTI">DSTI Building</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -793,7 +788,6 @@ export default function UserManagementPage() {
                 <Button
                   onClick={handleSaveNewUser}
                   className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  disabled={isUpdating}
                 >
                   Add User
                 </Button>
@@ -905,17 +899,9 @@ export default function UserManagementPage() {
                       <SelectValue placeholder="Select building" />
                     </SelectTrigger>
                     <SelectContent>
-                      {buildingsLoading ? (
-                        <SelectItem value="loading" disabled>
-                          Loading buildings...
-                        </SelectItem>
-                      ) : (
-                        buildingOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))
-                      )}
+                      <SelectItem value="Building 41">Building 41</SelectItem>
+                      <SelectItem value="Building 42">Building 42</SelectItem>
+                      <SelectItem value="DSTI">DSTI Building</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1039,7 +1025,6 @@ export default function UserManagementPage() {
                 <Button
                   onClick={handleSaveEditUser}
                   className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  disabled={isUpdating}
                 >
                   Save Changes
                 </Button>
@@ -1058,7 +1043,6 @@ export default function UserManagementPage() {
           </Card>
         </div>
       )}
-      </div>
-    </ProtectedRoute>
+    </div>
   );
 }

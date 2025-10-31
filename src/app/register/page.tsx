@@ -13,15 +13,9 @@ import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useBuildingSelectionPublic } from "@/hooks/api/useBuildingSelectionPublic";
-import { useProgrammeSelectionPublic } from "@/hooks/api/useProgrammeSelectionPublic";
-import { authService } from "@/lib/api";
-import { AlertCircle } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelectionPublic();
-  const { programmeOptions, isLoading: programmesLoading } = useProgrammeSelectionPublic();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -32,103 +26,78 @@ export default function RegisterPage() {
   const [laptopModel, setLaptopModel] = useState("");
   const [assetNumber, setAssetNumber] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Building data
+  const buildings = [
+    "The Department of Science, Technology and Innovation",
+    "Building 41",
+    "Building 42",
+  ];
+
+  // Programme data
+  const programmes = [
+    "Programme 1A",
+    "Programme 1B",
+    "Programme 2",
+    "Programme 3",
+    "Programme 4",
+    "Programme 5",
+    "Programme 6",
+  ];
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
     // Validate all required fields
     if (!email.trim()) {
-      setError("Please enter your email address");
+      alert("Please enter your email address");
       return;
     }
     if (!password.trim()) {
-      setError("Please enter a password");
+      alert("Please enter a password");
       return;
     }
     if (!firstName.trim()) {
-      setError("Please enter your first name");
+      alert("Please enter your first name");
       return;
     }
     if (!lastName.trim()) {
-      setError("Please enter your last name");
+      alert("Please enter your last name");
       return;
     }
     if (!phone.trim()) {
-      setError("Please enter your phone number");
+      alert("Please enter your phone number");
       return;
     }
     if (!building) {
-      setError("Please select a building");
+      alert("Please select a building");
       return;
     }
     if (!employer) {
-      setError("Please select a programme");
+      alert("Please select a programme");
       return;
     }
     if (!laptopModel.trim()) {
-      setError("Please enter your laptop model");
+      alert("Please enter your laptop model");
       return;
     }
     if (!assetNumber.trim()) {
-      setError("Please enter your laptop asset number");
+      alert("Please enter your laptop asset number");
       return;
     }
 
-    setIsSubmitting(true);
+    // Save registration data to sessionStorage
+    sessionStorage.setItem("email", email);
+    sessionStorage.setItem("firstName", firstName);
+    sessionStorage.setItem("lastName", lastName);
+    sessionStorage.setItem("phone", phone);
+    sessionStorage.setItem("building", building);
+    sessionStorage.setItem("programme", employer);
+    sessionStorage.setItem("laptopModel", laptopModel);
+    sessionStorage.setItem("assetNumber", assetNumber);
 
-    try {
-      // Register user directly with Azure API
-      const userData = {
-        email: email.trim(),
-        password: password,
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        phone: phone.trim(),
-        building_id: building,
-        programme_id: employer,
-        laptop_model: laptopModel.trim(),
-        laptop_asset_number: assetNumber.trim(),
-        is_active: true,
-      };
-
-      console.log("📝 Attempting registration with data:", { ...userData, password: "***" });
-      const user = await authService.registerUser(userData);
-      console.log("✅ Registration successful:", user);
-
-      if (user && user.id) {
-        // Registration successful - navigate to camera page for photo upload
-        // Store minimal data in sessionStorage only for photo upload step
-        sessionStorage.setItem("pendingPhotoUserId", user.id);
-        console.log("📸 Navigating to camera page for user:", user.id);
-        router.push("/register/camera");
-      } else {
-        console.error("❌ Registration failed - no user returned");
-        setError("Registration failed. Please try again.");
-      }
-    } catch (err: any) {
-      console.error("❌ Registration error:", err);
-      // Extract detailed error message
-      let errorMessage = "Registration failed. Please try again.";
-      
-      if (err?.data?.detail) {
-        if (Array.isArray(err.data.detail)) {
-          // Handle validation errors
-          errorMessage = err.data.detail.map((e: any) => `${e.loc?.join('.') || 'Field'}: ${e.msg}`).join(', ');
-        } else {
-          errorMessage = err.data.detail;
-        }
-      } else if (err?.message) {
-        errorMessage = err.message;
-      }
-      
-      console.error("Error details:", { message: errorMessage, fullError: err });
-      setError(errorMessage);
-    } finally {
-      setIsSubmitting(false);
-    }
+    // Navigate to camera page for selfie
+    router.push("/register/camera");
   };
 
   return (
@@ -143,14 +112,6 @@ export default function RegisterPage() {
 
       {/* Content */}
       <div className="p-4 md:p-6 max-w-2xl mx-auto">
-        {/* Error Message */}
-        {error && (
-          <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <span className="text-sm">{error}</span>
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Email Address */}
           <div className="space-y-2">
@@ -249,18 +210,12 @@ export default function RegisterPage() {
               <SelectTrigger className="h-12 md:h-14 text-base border-gray-300">
                 <SelectValue placeholder="Select a building" />
               </SelectTrigger>
-              <SelectContent position="popper">
-                {buildingsLoading ? (
-                  <SelectItem value="loading" disabled>
-                    Loading buildings...
+              <SelectContent>
+                {buildings.map((b) => (
+                  <SelectItem key={b} value={b}>
+                    {b}
                   </SelectItem>
-                ) : (
-                  buildingOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -274,18 +229,12 @@ export default function RegisterPage() {
               <SelectTrigger className="h-12 md:h-14 text-base border-gray-300">
                 <SelectValue placeholder="Select a programme" />
               </SelectTrigger>
-              <SelectContent position="popper">
-                {programmesLoading ? (
-                  <SelectItem value="loading" disabled>
-                    Loading programmes...
+              <SelectContent>
+                {programmes.map((prog) => (
+                  <SelectItem key={prog} value={prog}>
+                    {prog}
                   </SelectItem>
-                ) : (
-                  programmeOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -321,17 +270,9 @@ export default function RegisterPage() {
           {/* Register Button */}
           <Button
             type="submit"
-            className="w-full h-12 md:h-14 text-base md:text-lg font-semibold bg-primary hover:bg-primary/90 text-white rounded-lg mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isSubmitting}
+            className="w-full h-12 md:h-14 text-base md:text-lg font-semibold bg-primary hover:bg-primary/90 text-white rounded-lg mt-4"
           >
-            {isSubmitting ? (
-              <div className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                <span>Registering...</span>
-              </div>
-            ) : (
-              "REGISTER"
-            )}
+            REGISTER
           </Button>
         </form>
       </div>
