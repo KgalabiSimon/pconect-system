@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ClientBody from "./ClientBody";
 import { BookingProvider } from "@/contexts/BookingContext";
+import { AuthProvider } from "@/hooks/api/useAuth";
 import Script from "next/script";
 
 const geistSans = Geist({
@@ -34,9 +35,11 @@ export default function RootLayout({
         />
       </head>
       <body suppressHydrationWarning className="antialiased">
-        <BookingProvider>
-          <ClientBody>{children}</ClientBody>
-        </BookingProvider>
+        <AuthProvider>
+          <BookingProvider>
+            <ClientBody>{children}</ClientBody>
+          </BookingProvider>
+        </AuthProvider>
       </body>
     </html>
   );

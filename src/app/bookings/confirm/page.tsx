@@ -4,7 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBooking } from "@/contexts/BookingContext";
-import { Check, Plus, X } from "lucide-react";
+import { useBookings } from "@/hooks/api/useBookings";
+import { useBuildings } from "@/hooks/api/useBuildings";
+import { useSpaces } from "@/hooks/api/useSpaces";
+import { Check, Plus, X, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -12,6 +15,10 @@ import { useState } from "react";
 export default function ConfirmBookingPage() {
   const router = useRouter();
   const { bookingState, resetBooking } = useBooking();
+  const { buildings } = useBuildings();
+  const { spaces } = useSpaces({ buildingId: bookingState.building as string, initialLoad: false });
+  const { createBooking, isLoading: isCreating, error } = useBookings();
+  
   const [guestEmails, setGuestEmails] = useState<string[]>([]);
   const [currentEmail, setCurrentEmail] = useState("");
   const [sendNotifications, setSendNotifications] = useState(true);
@@ -38,27 +45,61 @@ export default function ConfirmBookingPage() {
     setGuestEmails(guestEmails.filter((e) => e !== email));
   };
 
-  const handleConfirm = () => {
-    // In real app, would call API to create booking
-    const bookingId = `BK-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-
-    // Navigate to success page with booking details
-    const params = new URLSearchParams({
-      building: bookingState.building?.toString() || "41",
-      type: bookingState.type || "desk",
-      spaceId: bookingState.spaceId || "",
-      date: bookingState.date || "",
-      bookingId: bookingId,
-    });
-
-    // Add time for meeting rooms
-    if (bookingState.type === "meeting_room" && bookingState.startTime && bookingState.endTime) {
-      params.append("startTime", bookingState.startTime);
-      params.append("endTime", bookingState.endTime);
+  const handleConfirm = async () => {
+    if (!bookingState.spaceId || !bookingState.date) {
+      alert("Missing required booking information");
+      return;
     }
 
-    resetBooking();
-    router.push(`/bookings/success?${params.toString()}`);
+    try {
+      // Prepare booking data for Azure API
+      const bookingData = {
+        space_id: bookingState.spaceId,
+        booking_date: bookingState.date,
+        start_time: bookingState.startTime || "06:00",
+        end_time: bookingState.endTime || "18:00",
+        guest_emails: guestEmails.length > 0 ? guestEmails.join(",") : undefined,
+        notify_guests: sendNotifications && guestEmails.length > 0,
+      };
+
+      // Create booking via Azure API
+      const newBooking = await createBooking(bookingData);
+      
+      if (newBooking) {
+        // Navigate to success page with booking details
+        const params = new URLSearchParams({
+          building: bookingState.building?.toString() || "",
+          type: bookingState.type || "desk",
+          spaceId: bookingState.spaceId || "",
+          date: bookingState.date || "",
+          bookingId: newBooking.id,
+        });
+
+        // Add time for meeting rooms
+        if (bookingState.type === "meeting_room" && bookingState.startTime && bookingState.endTime) {
+          params.append("startTime", bookingState.startTime);
+          params.append("endTime", bookingState.endTime);
+        }
+
+        resetBooking();
+        router.push(`/bookings/success?${params.toString()}`);
+      } else {
+        alert("Failed to create booking. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error creating booking:", error);
+      alert("Failed to create booking. Please try again.");
+    }
+  };
+
+  const getBuildingName = () => {
+    const building = buildings.find(b => b.id === bookingState.building);
+    return building?.name || `Building ${bookingState.building}`;
+  };
+
+  const getSpaceName = () => {
+    const space = spaces.find(s => s.id === bookingState.spaceId);
+    return space ? `${space.type} ${space.id.slice(-3)}` : bookingState.spaceId;
   };
 
   if (!bookingState.spaceId) {
@@ -76,6 +117,16 @@ export default function ConfirmBookingPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 px-4 py-3 mx-4 mt-4 rounded-lg">
+          <div className="flex items-center gap-2 text-red-700">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <span className="text-sm">{error}</span>
+          </div>
+        </div>
+      )}
+
       <div className="p-4 md:p-6 max-w-2xl mx-auto">
         <div className="text-center mb-8">
           <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
@@ -89,7 +140,7 @@ export default function ConfirmBookingPage() {
           <div className="space-y-3">
             <div className="flex justify-between">
               <span className="text-gray-600">Building:</span>
-              <span className="font-medium">Building {bookingState.building}</span>
+              <span className="font-medium">{getBuildingName()}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Type:</span>
@@ -98,8 +149,8 @@ export default function ConfirmBookingPage() {
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Space ID:</span>
-              <span className="font-medium">{bookingState.spaceId}</span>
+              <span className="text-gray-600">Space:</span>
+              <span className="font-medium">{getSpaceName()}</span>
             </div>
             {bookingState.floor && (
               <div className="flex justify-between">
@@ -207,8 +258,12 @@ export default function ConfirmBookingPage() {
         </Card>
 
         <div className="space-y-3">
-          <Button onClick={handleConfirm} className="w-full h-14 text-lg">
-            Confirm Booking
+          <Button 
+            onClick={handleConfirm} 
+            className="w-full h-14 text-lg"
+            disabled={isCreating}
+          >
+            {isCreating ? "Creating Booking..." : "Confirm Booking"}
           </Button>
           <Link href="/bookings/availability">
             <Button variant="outline" className="w-full h-12">

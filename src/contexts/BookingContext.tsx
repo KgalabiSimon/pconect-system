@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, ReactNode } from "react";
 
-type BuildingId = 41 | 42 | "DSTI";
+type BuildingId = string; // Changed to string to work with Azure API UUIDs
 type BookingType = "desk" | "office" | "meeting_room";
 type Floor = "Ground" | "1st" | "2nd";
 
