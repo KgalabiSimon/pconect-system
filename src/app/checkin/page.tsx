@@ -18,19 +18,20 @@ import { useCheckIns } from "@/hooks/api/useCheckIns";
 import { useBuildings } from "@/hooks/api/useBuildings";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import type { CheckInResponse } from "@/types/api";
+import { useToast } from "@/components/ui/toast";
 
 export default function CheckInPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, token } = useAuth();
   const { buildings, isLoading: buildingsLoading } = useBuildings();
   const { 
     checkIn, 
-    generateQRCode, 
     getActiveCheckIns,
     isLoading: checkInLoading, 
     error, 
     clearError 
   } = useCheckIns();
+  const { success: showSuccess, error: showError, warning: showWarning, ToastContainer } = useToast();
   
   const [selectedFloor, setSelectedFloor] = useState("");
   const [selectedBlock, setSelectedBlock] = useState("");
@@ -40,6 +41,33 @@ export default function CheckInPage() {
   const [checking, setChecking] = useState(true);
   const [hasActiveCheckIn, setHasActiveCheckIn] = useState(false);
   const [activeCheckIn, setActiveCheckIn] = useState<CheckInResponse | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const clearFormError = (field: string) => {
+    setFormErrors((prev) => {
+      if (!prev[field]) return prev;
+      const updated = { ...prev };
+      delete updated[field];
+      return updated;
+    });
+  };
+
+  // Prefill laptop information from user profile when user is available
+  useEffect(() => {
+    if (user?.laptop_model || user?.laptop_asset_number) {
+      // Only prefill if fields are empty (don't overwrite user input)
+      if (user.laptop_model && !laptopName) {
+        setLaptopName(user.laptop_model);
+      }
+      if (user.laptop_asset_number && !assetNumber) {
+        setAssetNumber(user.laptop_asset_number);
+      }
+      // Auto-select "yes" if user has laptop information and hasn't selected yet
+      if (user.laptop_model && user.laptop_asset_number && !hasLaptop) {
+        setHasLaptop("yes");
+      }
+    }
+  }, [user, laptopName, assetNumber, hasLaptop]);
 
   // Floor and Block data structure
   const floorBlockData: Record<string, string[]> = {
@@ -59,19 +87,25 @@ export default function CheckInPage() {
 
       try {
         const activeCheckIns = await getActiveCheckIns(user.id);
-        if (activeCheckIns.length > 0) {
+        // getActiveCheckIns now handles 403 gracefully and returns empty array
+        if (activeCheckIns && activeCheckIns.length > 0) {
           const activeCheckIn = activeCheckIns[0];
           setHasActiveCheckIn(true);
           setActiveCheckIn(activeCheckIn);
           
           // Redirect to QR page if QR code exists
-          if (activeCheckIn.qr_code) {
-            router.push(`/checkin/qr?data=${activeCheckIn.qr_code}&employeeId=${activeCheckIn.id}&date=${activeCheckIn.check_in_time.split('T')[0]}`);
+          if (activeCheckIn.qr_code_data || activeCheckIn.id) {
+            const qrCode = activeCheckIn.qr_code_data || activeCheckIn.id;
+            router.push(`/checkin/qr?data=${qrCode}&date=${activeCheckIn.check_in_time.split('T')[0]}`);
             return;
           }
         }
-      } catch (error) {
-        console.error('Error checking active check-ins:', error);
+        // If no active check-ins found (or empty array from 403), continue normally
+      } catch (error: any) {
+        // Only handle unexpected errors (403 is handled in getActiveCheckIns)
+        if (error?.status !== 403) {
+          showWarning("Could not verify existing check-ins. You may need to try again.");
+        }
       } finally {
         setChecking(false);
       }
@@ -87,87 +121,121 @@ export default function CheckInPage() {
   const handleFloorChange = (value: string) => {
     setSelectedFloor(value);
     setSelectedBlock(""); // Reset block when floor changes
+    clearFormError("floor");
+    clearFormError("block");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!user?.id) {
-      alert("User not authenticated");
+      showError("You must be logged in to check in.");
       return;
     }
 
-    // Validate all required fields
+    const validationErrors: Record<string, string> = {};
+
     if (!selectedFloor) {
-      alert("Please select a floor");
-      return;
+      validationErrors.floor = "Please select a floor";
     }
 
     if (!selectedBlock) {
-      alert("Please select a block");
-      return;
+      validationErrors.block = "Please select a block";
     }
 
     if (!hasLaptop) {
-      alert("Please select if you have a laptop");
+      validationErrors.hasLaptop = "Please select whether you have a laptop";
+    }
+
+    if (hasLaptop === "yes") {
+      if (!laptopName.trim()) {
+        validationErrors.laptopName = "Please enter the laptop model";
+      }
+      if (!assetNumber.trim()) {
+        validationErrors.assetNumber = "Please enter the asset number";
+      }
+    }
+
+    if (Object.keys(validationErrors).length > 0) {
+      setFormErrors(validationErrors);
+      const firstError = Object.values(validationErrors)[0];
+      if (firstError) {
+        showError(firstError);
+      }
       return;
     }
 
-    // If user has laptop, validate laptop fields
-    if (hasLaptop === "yes") {
-      if (!laptopName.trim()) {
-        alert("Please enter laptop name");
-        return;
-      }
-      if (!assetNumber.trim()) {
-        alert("Please enter asset number");
-        return;
-      }
-    }
+    setFormErrors({});
 
     try {
       clearError();
-      
-      // Create check-in data
+
       const checkInData = {
         user_id: user.id,
-        building_id: user.building_id || buildings[0]?.id || "", // Use user's building or first available
         floor: selectedFloor,
         block: selectedBlock,
-        laptop_model: hasLaptop === "yes" ? laptopName : undefined,
-        laptop_asset_number: hasLaptop === "yes" ? assetNumber : undefined,
-        purpose: "Work",
+        laptop_model: hasLaptop === "yes" ? laptopName : "None",  // Required by API
+        laptop_asset_number: hasLaptop === "yes" ? assetNumber : "N/A",  // Required by API
       };
 
-      // Create check-in
-      const newCheckIn = await checkIn(checkInData);
+      // Call checkIn with all the form data
+      const checkInResult = await checkIn(checkInData);
       
-      if (newCheckIn) {
-        // Generate QR code
-        const qrData = {
-          user_id: user.id,
-          building_id: checkInData.building_id,
-          floor: selectedFloor,
-          block: selectedBlock,
-          laptop_model: checkInData.laptop_model,
-          laptop_asset_number: checkInData.laptop_asset_number,
-        };
+      if (checkInResult) {
+        // API returns CheckInResponse with qr_code_data (which is the check-in ID UUID)
+        // The QR code data should be the check-in ID (UUID string)
+        const qrCodeString = checkInResult.qr_code_data || checkInResult.id;
 
-        const qrResult = await generateQRCode(qrData);
-        
-        if (qrResult) {
-          // Redirect to QR page
-          const today = new Date().toISOString().split('T')[0];
-          router.push(`/checkin/qr?data=${qrResult.qr_code}&employeeId=${newCheckIn.id}&date=${today}`);
-        } else {
-          alert("Check-in created but failed to generate QR code");
+        if (!qrCodeString) {
+          showError("Failed to generate a QR code. Please try again.");
+          return;
         }
+        
+        // Validate that it's a UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(qrCodeString)) {
+          showError("Invalid check-in ID returned by the server. Please try again.");
+          return;
+        }
+        
+        // Redirect to QR page with check-in ID
+        const today = new Date().toISOString().split('T')[0];
+        const encodedData = encodeURIComponent(qrCodeString);
+        showSuccess("Check-in created successfully.");
+        router.push(`/checkin/qr?data=${encodedData}&date=${today}`);
       } else {
-        alert("Failed to create check-in. Please try again.");
+        showError("Failed to create check-in. Please try again.");
       }
-    } catch (error) {
-      console.error("Check-in error:", error);
-      alert("Failed to create check-in. Please try again.");
+    } catch (error: any) {
+      // Extract the actual error message from the API
+      let errorMessage = "Failed to create check-in. Please try again.";
+      
+      // For validation/business logic errors (400/422), extract detailed message first
+      if (error?.status === 400 || error?.status === 422) {
+        const details = error?.details || {};
+        
+        // FastAPI can return detail as string or array
+        if (details?.detail) {
+          if (typeof details.detail === 'string') {
+            // Direct error message from backend (e.g., "User already has an active check-in")
+            errorMessage = details.detail;
+          } else if (Array.isArray(details.detail)) {
+            // Multiple validation errors
+            const errors = details.detail.map((err: any) => {
+              const field = err.loc?.join('.') || 'unknown';
+              return `${field}: ${err.msg}`;
+            }).join(', ');
+            errorMessage = `Validation failed: ${errors}`;
+          }
+        }
+      }
+      
+      // Fall back to error.message if we didn't get a good message from details
+      if (errorMessage === "Failed to create check-in. Please try again." && error?.message) {
+        errorMessage = error.message;
+      }
+
+      setFormErrors((prev) => ({ ...prev, form: errorMessage }));
+      showError(errorMessage);
     }
   };
 
@@ -191,7 +259,8 @@ export default function CheckInPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-background">
+        <ToastContainer />
+        <div className="min-h-screen bg-background">
         {/* Error Message */}
         {error && (
           <div className="bg-red-50 border border-red-200 px-4 py-3 mx-4 mt-4 rounded-lg">
@@ -235,6 +304,9 @@ export default function CheckInPage() {
                 ))}
               </SelectContent>
             </Select>
+            {formErrors.floor && (
+              <p className="text-sm text-red-600 mt-1">{formErrors.floor}</p>
+            )}
           </div>
 
           {/* Block Selection - Only show if floor is selected */}
@@ -243,7 +315,13 @@ export default function CheckInPage() {
               <label className="text-sm md:text-base font-medium text-foreground">
                 Select Block
               </label>
-              <Select value={selectedBlock} onValueChange={setSelectedBlock}>
+              <Select
+                value={selectedBlock}
+                onValueChange={(value) => {
+                  setSelectedBlock(value);
+                  clearFormError("block");
+                }}
+              >
                 <SelectTrigger className="h-12 md:h-14 text-base border-gray-300">
                   <SelectValue placeholder="Choose a block" />
                 </SelectTrigger>
@@ -255,6 +333,9 @@ export default function CheckInPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {formErrors.block && (
+                <p className="text-sm text-red-600 mt-1">{formErrors.block}</p>
+              )}
             </div>
           )}
 
@@ -263,7 +344,17 @@ export default function CheckInPage() {
             <label className="text-sm md:text-base font-medium text-foreground">
               Do you have a laptop?
             </label>
-            <Select value={hasLaptop} onValueChange={setHasLaptop}>
+            <Select
+              value={hasLaptop}
+              onValueChange={(value) => {
+                setHasLaptop(value);
+                clearFormError("hasLaptop");
+                if (value === "no") {
+                  clearFormError("laptopName");
+                  clearFormError("assetNumber");
+                }
+              }}
+            >
               <SelectTrigger className="h-12 md:h-14 text-base border-gray-300">
                 <SelectValue placeholder="Select an option" />
               </SelectTrigger>
@@ -272,6 +363,9 @@ export default function CheckInPage() {
                 <SelectItem value="no">No</SelectItem>
               </SelectContent>
             </Select>
+            {formErrors.hasLaptop && (
+              <p className="text-sm text-red-600 mt-1">{formErrors.hasLaptop}</p>
+            )}
           </div>
 
           {/* Laptop Name - Only show if "Yes" is selected */}
@@ -285,9 +379,15 @@ export default function CheckInPage() {
                   type="text"
                   placeholder="Enter laptop name"
                   value={laptopName}
-                  onChange={(e) => setLaptopName(e.target.value)}
+                  onChange={(e) => {
+                    setLaptopName(e.target.value);
+                    clearFormError("laptopName");
+                  }}
                   className="h-12 md:h-14 text-base border-gray-300"
                 />
+                {formErrors.laptopName && (
+                  <p className="text-sm text-red-600 mt-1">{formErrors.laptopName}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -298,14 +398,25 @@ export default function CheckInPage() {
                   type="text"
                   placeholder="Enter asset number"
                   value={assetNumber}
-                  onChange={(e) => setAssetNumber(e.target.value)}
+                  onChange={(e) => {
+                    setAssetNumber(e.target.value);
+                    clearFormError("assetNumber");
+                  }}
                   className="h-12 md:h-14 text-base border-gray-300"
                 />
+                {formErrors.assetNumber && (
+                  <p className="text-sm text-red-600 mt-1">{formErrors.assetNumber}</p>
+                )}
               </div>
             </>
           )}
 
           {/* Submit Button */}
+          {formErrors.form && (
+            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {formErrors.form}
+            </div>
+          )}
           <Button
             type="submit"
             className="w-full h-12 md:h-14 text-base md:text-lg font-semibold bg-primary hover:bg-primary/90 text-white rounded-lg mt-2"

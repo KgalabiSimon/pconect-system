@@ -23,10 +23,10 @@ import {
   Shield
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "@/hooks/api/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
 
 interface LaptopRecord {
   id: string;
@@ -51,9 +51,8 @@ interface LaptopRecord {
 }
 
 export default function LaptopsPage() {
-  const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const [isLoading, setIsLoading] = useState(true);
+  const { success, error: showError, ToastContainer } = useToast();
 
   const [laptopRecords, setLaptopRecords] = useState<LaptopRecord[]>([
     {
@@ -153,28 +152,6 @@ export default function LaptopsPage() {
   const [filterMatch, setFilterMatch] = useState("all");
   const [filterBuilding, setFilterBuilding] = useState("all");
 
-  useEffect(() => {
-    const checkAuth = () => {
-      try {
-        const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
-        if (!isAdminLoggedIn) {
-          router.push("/admin/login");
-        } else {
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error("Auth check error:", error);
-        router.push("/admin/login");
-      }
-    };
-
-    const timer = setTimeout(() => {
-      checkAuth();
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [router]);
-
   const filteredRecords = laptopRecords.filter((record) => {
     const matchesSearch =
       record.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -240,15 +217,15 @@ export default function LaptopsPage() {
       a.download = `laptop-tracking-${new Date().toISOString().split('T')[0]}.csv`;
       a.click();
       window.URL.revokeObjectURL(url);
-      alert(`Successfully exported ${filteredRecords.length} laptop records!`);
-    } catch (error) {
-      console.error("Export error:", error);
-      alert("Failed to export data. Please try again.");
+      success(`Successfully exported ${filteredRecords.length} laptop records!`);
+    } catch (err: any) {
+      const errorMessage = err?.message || "Failed to export data. Please try again.";
+      showError(errorMessage);
     }
   };
 
   // Show loading state while checking authentication
-  if (authLoading || isLoading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -261,12 +238,12 @@ export default function LaptopsPage() {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
-    router.push("/admin/login");
     return null;
   }
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute requireAdmin>
+      <ToastContainer />
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">

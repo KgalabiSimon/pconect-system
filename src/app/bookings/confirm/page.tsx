@@ -6,22 +6,29 @@ import { Input } from "@/components/ui/input";
 import { useBooking } from "@/contexts/BookingContext";
 import { useBookings } from "@/hooks/api/useBookings";
 import { useBuildings } from "@/hooks/api/useBuildings";
-import { useSpaces } from "@/hooks/api/useSpaces";
+import { useAuth } from "@/hooks/api/useAuth";
 import { Check, Plus, X, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 export default function ConfirmBookingPage() {
   const router = useRouter();
   const { bookingState, resetBooking } = useBooking();
-  const { buildings } = useBuildings();
-  const { spaces } = useSpaces({ buildingId: bookingState.building as string, initialLoad: false });
+  const { buildings, loadBuildings } = useBuildings({ initialLoad: true });
+  const { user } = useAuth();
   const { createBooking, isLoading: isCreating, error } = useBookings();
   
   const [guestEmails, setGuestEmails] = useState<string[]>([]);
   const [currentEmail, setCurrentEmail] = useState("");
   const [sendNotifications, setSendNotifications] = useState(true);
+
+  // Ensure buildings are loaded
+  useEffect(() => {
+    if (buildings.length === 0) {
+      loadBuildings();
+    }
+  }, [buildings.length, loadBuildings]);
 
   const isMeetingRoom = bookingState.type === "meeting_room";
 
@@ -45,21 +52,62 @@ export default function ConfirmBookingPage() {
     setGuestEmails(guestEmails.filter((e) => e !== email));
   };
 
+  // Helper function to map floor string to integer
+  const mapFloorToInteger = (floor?: string): number => {
+    if (!floor) return 0; // Default to ground floor
+    const floorMap: Record<string, number> = {
+      "Ground": 0,
+      "1st": 1,
+      "2nd": 2,
+    };
+    return floorMap[floor] ?? 0;
+  };
+
+  // Helper function to map booking type to SpaceType enum
+  const mapBookingTypeToSpaceType = (type?: string): "DESK" | "OFFICE" | "ROOM" => {
+    const typeMap: Record<string, "DESK" | "OFFICE" | "ROOM"> = {
+      "desk": "DESK",
+      "office": "OFFICE",
+      "meeting_room": "ROOM",
+    };
+    return typeMap[type || "desk"] || "DESK";
+  };
+
+  // Helper function to format date as ISO date-time string
+  const formatBookingDate = (date: string, time: string = "00:00"): string => {
+    // Combine date and time into ISO format
+    return new Date(`${date}T${time}:00`).toISOString();
+  };
+
   const handleConfirm = async () => {
-    if (!bookingState.spaceId || !bookingState.date) {
+    // Validate required fields for new API
+    if (!user?.id) {
+      alert("Please log in to create a booking");
+      return;
+    }
+    if (!bookingState.building || !bookingState.floor || !bookingState.type || !bookingState.date) {
       alert("Missing required booking information");
       return;
     }
 
     try {
-      // Prepare booking data for Azure API
+      // Prepare booking data for new Azure API format
+      const floorInteger = mapFloorToInteger(bookingState.floor);
+      const spaceType = mapBookingTypeToSpaceType(bookingState.type);
+      const startTime = bookingState.startTime || "06:00";
+      const endTime = bookingState.endTime || "18:00";
+      
+      // Format booking_date as ISO date-time string
+      const bookingDate = formatBookingDate(bookingState.date, startTime);
+
       const bookingData = {
-        space_id: bookingState.spaceId,
-        booking_date: bookingState.date,
-        start_time: bookingState.startTime || "06:00",
-        end_time: bookingState.endTime || "18:00",
-        guest_emails: guestEmails.length > 0 ? guestEmails.join(",") : undefined,
-        notify_guests: sendNotifications && guestEmails.length > 0,
+        user_id: user.id,
+        building_id: bookingState.building,
+        floor: floorInteger,
+        space_type: spaceType,
+        booking_date: bookingDate,
+        start_time: startTime,
+        end_time: endTime,
       };
 
       // Create booking via Azure API
@@ -70,7 +118,7 @@ export default function ConfirmBookingPage() {
         const params = new URLSearchParams({
           building: bookingState.building?.toString() || "",
           type: bookingState.type || "desk",
-          spaceId: bookingState.spaceId || "",
+          floor: bookingState.floor || "",
           date: bookingState.date || "",
           bookingId: newBooking.id,
         });
@@ -92,21 +140,28 @@ export default function ConfirmBookingPage() {
     }
   };
 
-  const getBuildingName = () => {
+  // Use useMemo to compute building name and update when buildings load
+  const buildingName = useMemo(() => {
+    if (!bookingState.building) return "Unknown Building";
+    
     const building = buildings.find(b => b.id === bookingState.building);
-    return building?.name || `Building ${bookingState.building}`;
-  };
+    
+    // Try name first, then building_code, then fallback to ID
+    if (building) {
+      return building.name || building.building_code || `Building ${building.id}`;
+    }
+    
+    // If building not found yet, return a placeholder
+    // This can happen if buildings are still loading
+    return "Loading...";
+  }, [bookingState.building, buildings]);
 
-  const getSpaceName = () => {
-    const space = spaces.find(s => s.id === bookingState.spaceId);
-    return space ? `${space.type} ${space.id.slice(-3)}` : bookingState.spaceId;
-  };
-
-  if (!bookingState.spaceId) {
+  // Check if required booking fields are present
+  if (!bookingState.building || !bookingState.floor || !bookingState.type || !bookingState.date) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="p-6 text-center">
-          <p className="text-gray-600 mb-4">No space selected</p>
+          <p className="text-gray-600 mb-4">Missing required booking information</p>
           <Link href="/bookings">
             <Button>Start Booking</Button>
           </Link>
@@ -140,7 +195,7 @@ export default function ConfirmBookingPage() {
           <div className="space-y-3">
             <div className="flex justify-between">
               <span className="text-gray-600">Building:</span>
-              <span className="font-medium">{getBuildingName()}</span>
+              <span className="font-medium">{buildingName}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Type:</span>
@@ -149,8 +204,10 @@ export default function ConfirmBookingPage() {
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Space:</span>
-              <span className="font-medium">{getSpaceName()}</span>
+              <span className="text-gray-600">Space Type:</span>
+              <span className="font-medium capitalize">
+                {bookingState.type?.replace("_", " ")}
+              </span>
             </div>
             {bookingState.floor && (
               <div className="flex justify-between">

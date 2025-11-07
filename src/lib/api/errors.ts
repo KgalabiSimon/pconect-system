@@ -121,9 +121,28 @@ export function createAPIErrorFromResponse(response: Response, details?: any): A
   } else if (status === 404) {
     type = 'NOT_FOUND_ERROR';
     message = 'Resource not found';
-  } else if (status === 422) {
+  } else if (status === 400 || status === 422) {
+    // Both 400 and 422 are validation errors
     type = 'VALIDATION_ERROR';
     message = 'Validation failed';
+    // Extract validation details from FastAPI/Pydantic error format
+    if (details?.detail) {
+      if (Array.isArray(details.detail)) {
+        // FastAPI validation error format
+        const errors = details.detail.map((err: any) => {
+          const field = err.loc?.join('.') || 'unknown';
+          return `${field}: ${err.msg}`;
+        }).join(', ');
+        message = `Validation failed: ${errors}`;
+      } else if (typeof details.detail === 'string') {
+        message = details.detail;
+      } else {
+        message = JSON.stringify(details.detail);
+      }
+    } else if (details?.message && typeof details.message === 'string') {
+      // Some APIs return {message: "error text"}
+      message = details.message;
+    }
   } else if (status >= 500) {
     type = 'SERVER_ERROR';
     message = 'Server error';

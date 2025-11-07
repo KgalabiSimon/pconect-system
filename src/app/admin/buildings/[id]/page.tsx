@@ -35,6 +35,8 @@ import { useAuth } from "@/hooks/api/useAuth";
 import { useBuildings } from "@/hooks/api/useBuildings";
 import { useSpaces } from "@/hooks/api/useSpaces";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { 
   BuildingResponse, 
   SpaceResponse, 
@@ -72,6 +74,10 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
   const [showAddSpaceModal, setShowAddSpaceModal] = useState(false);
   const [showEditSpaceModal, setShowEditSpaceModal] = useState(false);
   const [selectedSpace, setSelectedSpace] = useState<SpaceResponse | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [spaceToDelete, setSpaceToDelete] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const { success, error: showError, ToastContainer } = useToast();
 
   const [spaceFormData, setSpaceFormData] = useState({
     type: "DESK" as "DESK" | "OFFICE" | "ROOM",
@@ -99,10 +105,24 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
   };
 
   const handleSaveNewSpace = async () => {
-    try {
-      clearError();
-      if (!id) return;
+    if (!id) return;
 
+    setFormErrors({});
+    clearError();
+
+    // Validate form
+    const newErrors: Record<string, string> = {};
+    if (spaceFormData.quantity < 1) {
+      newErrors.quantity = "Quantity must be at least 1";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      showError("Please fix the validation errors");
+      return;
+    }
+
+    try {
       const spaceData: SpaceCreate = {
         type: spaceFormData.type,
         quantity: spaceFormData.quantity,
@@ -110,15 +130,24 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
 
       const newSpaces = await createSpaces(id, [spaceData]);
       if (newSpaces && newSpaces.length > 0) {
-        alert("Space added successfully!");
+        success("Space added successfully!");
         setShowAddSpaceModal(false);
+        setSpaceFormData({ type: "DESK", quantity: 1 });
+        setFormErrors({});
         loadBuildingSpaces(id); // Reload spaces
       } else {
-        alert("Failed to add space. Please try again.");
+        showError("Failed to add space. Please try again.");
       }
-    } catch (error) {
-      console.error("Add space error:", error);
-      alert("Failed to add space. Please try again.");
+    } catch (err: any) {
+      let errorMessage = "Failed to add space. Please try again.";
+      if (err?.message) {
+        errorMessage = err.message;
+      } else if (err?.details?.detail) {
+        errorMessage = Array.isArray(err.details.detail)
+          ? err.details.detail.map((e: any) => e.msg).join(", ")
+          : err.details.detail;
+      }
+      showError(errorMessage);
     }
   };
 
@@ -132,42 +161,73 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
   };
 
   const handleSaveEditSpace = async () => {
-    try {
-      clearError();
-      if (!selectedSpace) return;
+    if (!selectedSpace) return;
 
+    setFormErrors({});
+    clearError();
+
+    // Validate form
+    const newErrors: Record<string, string> = {};
+    if (spaceFormData.quantity < 1) {
+      newErrors.quantity = "Quantity must be at least 1";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      showError("Please fix the validation errors");
+      return;
+    }
+
+    try {
       const updateData: SpaceUpdate = {
         quantity: spaceFormData.quantity,
       };
 
       const updatedSpace = await updateSpace(selectedSpace.id, updateData);
       if (updatedSpace) {
-        alert("Space updated successfully!");
+        success("Space updated successfully!");
         setShowEditSpaceModal(false);
+        setSelectedSpace(null);
+        setFormErrors({});
         loadBuildingSpaces(id!); // Reload spaces
       } else {
-        alert("Failed to update space. Please try again.");
+        showError("Failed to update space. Please try again.");
       }
-    } catch (error) {
-      console.error("Edit space error:", error);
-      alert("Failed to update space. Please try again.");
+    } catch (err: any) {
+      let errorMessage = "Failed to update space. Please try again.";
+      if (err?.message) {
+        errorMessage = err.message;
+      } else if (err?.details?.detail) {
+        errorMessage = Array.isArray(err.details.detail)
+          ? err.details.detail.map((e: any) => e.msg).join(", ")
+          : err.details.detail;
+      }
+      showError(errorMessage);
     }
   };
 
-  const handleDeleteSpace = async (spaceId: string) => {
+  const handleDeleteClick = (spaceId: string) => {
+    setSpaceToDelete(spaceId);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!spaceToDelete || !id) return;
+
     try {
-      if (confirm("Are you sure you want to delete this space?")) {
-        const success = await deleteSpace(spaceId);
-        if (success) {
-          alert("Space deleted successfully!");
-          loadBuildingSpaces(id!); // Reload spaces
-        } else {
-          alert("Failed to delete space. Please try again.");
-        }
+      const deleted = await deleteSpace(spaceToDelete);
+      if (deleted) {
+        success("Space deleted successfully!");
+        loadBuildingSpaces(id); // Reload spaces
+      } else {
+        showError("Failed to delete space. Please try again.");
       }
-    } catch (error) {
-      console.error("Error deleting space:", error);
-      alert("Failed to delete space. Please try again.");
+    } catch (err: any) {
+      const errorMessage = err?.message || "Failed to delete space. Please try again.";
+      showError(errorMessage);
+    } finally {
+      setShowDeleteConfirm(false);
+      setSpaceToDelete(null);
     }
   };
 
@@ -195,6 +255,20 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <ProtectedRoute>
+      <ToastContainer />
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setSpaceToDelete(null);
+        }}
+        title="Delete Space"
+        message="Are you sure you want to delete this space? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
       <div className="min-h-screen bg-gray-50">
         {/* Error Message */}
         {error && (
@@ -337,8 +411,8 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
                           <Building2 className="w-6 h-6 text-blue-600" />
                         </div>
                         <div>
-                          <h3 className="font-semibold text-gray-900">{space.type}</h3>
-                          <p className="text-sm text-gray-600">Quantity: {space.quantity}</p>
+                          <h3 className="font-semibold text-gray-900">{building?.name || "Building"}</h3>
+                          <p className="text-sm text-gray-600 capitalize">{space.type.toLowerCase()}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
@@ -354,7 +428,7 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
                           variant="ghost"
                           size="icon"
                           className="text-gray-600 hover:text-red-600"
-                          onClick={() => handleDeleteSpace(space.id)}
+                          onClick={() => handleDeleteClick(space.id)}
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -363,8 +437,12 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
 
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <span className="font-medium">Building ID:</span>
-                        <span className="truncate">{space.building_id}</span>
+                        <span className="font-medium">Quantity:</span>
+                        <span>{space.quantity}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <span className="font-medium">Building:</span>
+                        <span className="truncate">{building?.name || 'N/A'}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <span className="font-medium">Created:</span>
@@ -451,10 +529,16 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
                     type="number"
                     min="1"
                     value={spaceFormData.quantity}
-                    onChange={(e) => setSpaceFormData({ ...spaceFormData, quantity: parseInt(e.target.value) })}
-                    className="h-10"
+                    onChange={(e) => {
+                      setSpaceFormData({ ...spaceFormData, quantity: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, quantity: "" });
+                    }}
+                    className={`h-10 ${formErrors.quantity ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.quantity && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.quantity}</p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3 mt-6">
@@ -512,10 +596,16 @@ export default function BuildingDetailPage({ params }: { params: Promise<{ id: s
                     type="number"
                     min="1"
                     value={spaceFormData.quantity}
-                    onChange={(e) => setSpaceFormData({ ...spaceFormData, quantity: parseInt(e.target.value) })}
-                    className="h-10"
+                    onChange={(e) => {
+                      setSpaceFormData({ ...spaceFormData, quantity: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, quantity: "" });
+                    }}
+                    className={`h-10 ${formErrors.quantity ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.quantity && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.quantity}</p>
+                  )}
                 </div>
               </form>
 

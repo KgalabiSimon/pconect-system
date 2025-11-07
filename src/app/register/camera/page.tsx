@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Camera, CheckCircle2, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { authService, usersService } from "@/lib/api";
+import { authService, userService } from "@/lib/api";
 import { useAuth } from "@/hooks/api/useAuth";
 
 export default function CameraPage() {
@@ -18,23 +18,9 @@ export default function CameraPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registeredUserId, setRegisteredUserId] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    // Check if user just registered (has pending photo user ID)
-    const pendingPhotoUserId = sessionStorage.getItem("pendingPhotoUserId");
-    console.log("📷 Camera page - pendingPhotoUserId:", pendingPhotoUserId);
-    
-    if (pendingPhotoUserId) {
-      console.log("✅ User registered, starting camera for user:", pendingPhotoUserId);
-      setRegisteredUserId(pendingPhotoUserId);
-      sessionStorage.removeItem("pendingPhotoUserId");
-    } else {
-      // If no pending registration, redirect to registration page
-      console.log("⚠️ No pending registration found, redirecting to register page");
-      router.push("/register");
-      return;
-    }
-
     let currentStream: MediaStream | null = null;
 
     // Request camera access
@@ -55,7 +41,40 @@ export default function CameraPage() {
       }
     };
 
+    // If we already have registeredUserId from a previous render, just start camera
+    // This prevents Fast Refresh from clearing the state
+    if (registeredUserId) {
+      console.log("📷 Camera page already initialized, userId:", registeredUserId);
     startCamera();
+      return () => {
+        if (currentStream) {
+          currentStream.getTracks().forEach((track) => track.stop());
+        }
+      };
+    }
+
+    // If already initialized but no userId, don't do anything (waiting for state update)
+    if (isInitialized) {
+      return;
+    }
+
+    // Check if user just registered (has pending photo user ID)
+    const pendingPhotoUserId = sessionStorage.getItem("pendingPhotoUserId");
+    console.log("📷 Camera page - pendingPhotoUserId:", pendingPhotoUserId);
+    
+    if (pendingPhotoUserId) {
+      console.log("✅ User registered, starting camera for user:", pendingPhotoUserId);
+      setRegisteredUserId(pendingPhotoUserId);
+      setIsInitialized(true);
+      // Don't remove from sessionStorage yet - only remove after photo is uploaded
+      // This way if Fast Refresh happens, we can still recover it
+      startCamera();
+    } else {
+      // If no pending registration, redirect to registration page
+      console.log("⚠️ No pending registration found, redirecting to register page");
+      router.push("/register");
+      return;
+    }
 
     // Cleanup function to stop camera when component unmounts
     return () => {
@@ -63,7 +82,7 @@ export default function CameraPage() {
         currentStream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [router]);
+  }, [router, registeredUserId, isInitialized]);
 
   const capturePhoto = () => {
     if (videoRef.current && canvasRef.current) {
@@ -133,15 +152,16 @@ export default function CameraPage() {
       // Note: In a real implementation, you would:
       // 1. Upload photo to Azure Blob Storage or file service
       // 2. Get the URL back
-      // 3. Update user profile with photo_url via usersService.updateUser()
+      // 3. Update user profile with photo_url via userService.updateUser()
 
       // For now, since the user is already registered, we need to log them in
       // We'll need to get the email/password from somewhere - but we don't have it
       // So we'll just navigate to login page with a message
       
-      // Clear any old session data
+      // Clear any old session data and the pending photo user ID
       sessionStorage.removeItem("selfieCaptured");
       sessionStorage.removeItem("selfieImage");
+      sessionStorage.removeItem("pendingPhotoUserId"); // Remove after photo is processed
       
       console.log("✅ Registration complete! Navigating to login page...");
       // Navigate to login page with success message

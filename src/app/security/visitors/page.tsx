@@ -5,11 +5,12 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ArrowLeft, Search, Download, Users, AlertCircle } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useVisitors } from "@/hooks/api/useVisitors";
 import { useAuth } from "@/hooks/api/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import type { VisitorResponse } from "@/types/api";
+import { useToast } from "@/components/ui/toast";
 
 export default function VisitorRegisterPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -24,10 +25,20 @@ export default function VisitorRegisterPage() {
     getActiveVisitors,
     clearError 
   } = useVisitors();
+  const { success: showSuccess, error: showError, warning: showWarning, ToastContainer } = useToast();
   
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredVisitors, setFilteredVisitors] = useState<VisitorResponse[]>([]);
   const [activeVisitors, setActiveVisitors] = useState<VisitorResponse[]>([]);
+
+  const loadActiveVisitors = useCallback(async () => {
+    try {
+      const active = await getActiveVisitors();
+      setActiveVisitors(active);
+    } catch (error) {
+      showWarning("Unable to load active visitors. Please try again.");
+    }
+  }, [getActiveVisitors, showWarning]);
 
   // Load visitors on component mount
   useEffect(() => {
@@ -53,22 +64,14 @@ export default function VisitorRegisterPage() {
     }
   }, [searchTerm, visitors]);
 
-  // Load active visitors
-  const loadActiveVisitors = async () => {
-    try {
-      const active = await getActiveVisitors();
-      setActiveVisitors(active);
-    } catch (error) {
-      console.error('Error loading active visitors:', error);
-    }
-  };
-
   const handleCheckIn = async (visitorId: string) => {
     try {
       await checkInVisitor(visitorId);
       await loadActiveVisitors(); // Refresh active visitors
+      showSuccess("Visitor checked in successfully.");
     } catch (error) {
-      console.error('Error checking in visitor:', error);
+      const message = (error as any)?.message || "Failed to check in visitor. Please try again.";
+      showError(message);
     }
   };
 
@@ -76,17 +79,20 @@ export default function VisitorRegisterPage() {
     try {
       await checkOutVisitor(visitorId);
       await loadActiveVisitors(); // Refresh active visitors
+      showSuccess("Visitor checked out successfully.");
     } catch (error) {
-      console.error('Error checking out visitor:', error);
+      const message = (error as any)?.message || "Failed to check out visitor. Please try again.";
+      showError(message);
     }
   };
 
   const exportRegister = () => {
-    alert("Visitor register exported to CSV");
+    showSuccess("Visitor register exported to CSV");
   };
 
   return (
     <ProtectedRoute>
+      <ToastContainer />
       <div className="min-h-screen bg-gray-900">
         {/* Error Message */}
         {error && (

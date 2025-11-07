@@ -32,6 +32,9 @@ export const useBuildings = (options?: UseBuildingsOptions) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Extract initialLoad value to ensure stable dependency
+  const initialLoad = options?.initialLoad ?? false;
 
   const clearError = useCallback(() => {
     setError(null);
@@ -39,10 +42,7 @@ export const useBuildings = (options?: UseBuildingsOptions) => {
 
   const loadBuildings = useCallback(
     async (params?: GetBuildingsParams) => {
-      if (!isAuthenticated) {
-        setError('Authentication required to load buildings.');
-        return;
-      }
+      // Note: GET /api/v1/buildings/ doesn't require authentication per API spec
       setIsLoading(true);
       setError(null);
       try {
@@ -55,7 +55,7 @@ export const useBuildings = (options?: UseBuildingsOptions) => {
         setIsLoading(false);
       }
     },
-    [isAuthenticated]
+    [] // Removed isAuthenticated dependency - buildings endpoint doesn't require auth
   );
 
   const getBuildingById = useCallback(
@@ -231,10 +231,12 @@ export const useBuildings = (options?: UseBuildingsOptions) => {
   );
 
   useEffect(() => {
-    if (options?.initialLoad && isAuthenticated) {
+    // Buildings endpoint doesn't require authentication, so load regardless of auth status
+    if (initialLoad) {
       loadBuildings();
     }
-  }, [options?.initialLoad, isAuthenticated, loadBuildings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLoad]); // Stable dependency - only boolean value, not the options object
 
   return {
     buildings,

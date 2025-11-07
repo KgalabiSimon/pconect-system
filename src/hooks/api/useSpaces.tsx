@@ -45,9 +45,8 @@ export const useSpaces = (options?: UseSpacesOptions) => {
       setIsLoading(true);
       setError(null);
       try {
-        // Note: The getSpaces method throws an error since the endpoint doesn't exist
-        // This is kept for future compatibility
-        throw new Error('GET /api/v1/spaces/ endpoint not available. Use loadBuildingSpaces instead.');
+        const spacesData = await spacesService.getSpaces(params);
+        setSpaces(spacesData);
       } catch (err: any) {
         setError(err.message || 'Failed to load spaces.');
         console.error('Failed to load spaces:', err);
@@ -211,6 +210,102 @@ export const useSpaces = (options?: UseSpacesOptions) => {
     }
   }, [options?.initialLoad, options?.buildingId, isAuthenticated, loadBuildingSpaces, loadSpaces]);
 
+  const getSpaceById = useCallback(
+    async (spaceId: string): Promise<SpaceResponse | null> => {
+      if (!isAuthenticated) {
+        setError('Authentication required to get space.');
+        return null;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const space = await spacesService.getSpaceById(spaceId);
+        return space;
+      } catch (err: any) {
+        setError(err.message || 'Failed to get space.');
+        console.error('Failed to get space:', err);
+        return null;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isAuthenticated]
+  );
+
+  const createSpaceGlobal = useCallback(
+    async (spaceData: SpaceCreate): Promise<SpaceResponse | null> => {
+      if (!isAuthenticated) {
+        setError('Authentication required to create space.');
+        return null;
+      }
+      setIsUpdating(true);
+      setError(null);
+      try {
+        const newSpace = await spacesService.createSpaceGlobal(spaceData);
+        setSpaces((prev) => [...prev, newSpace]);
+        return newSpace;
+      } catch (err: any) {
+        setError(err.message || 'Failed to create space.');
+        console.error('Failed to create space:', err);
+        return null;
+      } finally {
+        setIsUpdating(false);
+      }
+    },
+    [isAuthenticated]
+  );
+
+  const updateSpaceGlobal = useCallback(
+    async (
+      spaceId: string,
+      spaceData: SpaceUpdate
+    ): Promise<SpaceResponse | null> => {
+      if (!isAuthenticated) {
+        setError('Authentication required to update space.');
+        return null;
+      }
+      setIsUpdating(true);
+      setError(null);
+      try {
+        const updatedSpace = await spacesService.updateSpaceGlobal(spaceId, spaceData);
+        setSpaces((prev) =>
+          prev.map((space) => (space.id === spaceId ? updatedSpace : space))
+        );
+        return updatedSpace;
+      } catch (err: any) {
+        setError(err.message || 'Failed to update space.');
+        console.error('Failed to update space:', err);
+        return null;
+      } finally {
+        setIsUpdating(false);
+      }
+    },
+    [isAuthenticated]
+  );
+
+  const deleteSpaceGlobal = useCallback(
+    async (spaceId: string): Promise<boolean> => {
+      if (!isAuthenticated) {
+        setError('Authentication required to delete space.');
+        return false;
+      }
+      setIsUpdating(true);
+      setError(null);
+      try {
+        await spacesService.deleteSpaceGlobal(spaceId);
+        setSpaces((prev) => prev.filter((space) => space.id !== spaceId));
+        return true;
+      } catch (err: any) {
+        setError(err.message || 'Failed to delete space.');
+        console.error('Failed to delete space:', err);
+        return false;
+      } finally {
+        setIsUpdating(false);
+      }
+    },
+    [isAuthenticated]
+  );
+
   return {
     spaces,
     floors,
@@ -221,9 +316,13 @@ export const useSpaces = (options?: UseSpacesOptions) => {
     clearError,
     loadSpaces,
     loadBuildingSpaces,
+    getSpaceById,
     createSpaces,
+    createSpaceGlobal,
     updateSpace,
+    updateSpaceGlobal,
     deleteSpace,
+    deleteSpaceGlobal,
     loadBuildingFloors,
     loadBuildingBlocks,
   };

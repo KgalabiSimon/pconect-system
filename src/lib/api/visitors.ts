@@ -15,22 +15,18 @@ import type {
 
 export class VisitorsService {
   /**
-   * Get all visitors
+   * Get all visitors (admin/security)
    */
   async getVisitors(): Promise<VisitorResponse[]> {
-    const response = await apiClient.get<VisitorResponse[]>(API_ENDPOINTS.VISITORS.LIST);
+    const response = await apiClient.get<VisitorResponse[]>(API_ENDPOINTS.VISITORS.ALL);
     return response.data;
   }
 
   /**
-   * Create a new visitor
+   * Create a new visitor (alias for registerVisitor)
    */
   async createVisitor(data: VisitorCreate): Promise<VisitorResponse> {
-    const response = await apiClient.post<VisitorResponse>(
-      API_ENDPOINTS.VISITORS.CREATE,
-      data
-    );
-    return response.data;
+    return this.registerVisitor(data);
   }
 
   /**
@@ -73,13 +69,18 @@ export class VisitorsService {
   }
 
   /**
-   * Search visitors
+   * Filter visitors by name, mobile, or purpose
+   * Uses GET with query parameters instead of POST
    */
   async searchVisitors(searchParams: VisitorSearch): Promise<VisitorResponse[]> {
-    const response = await apiClient.post<VisitorResponse[]>(
-      API_ENDPOINTS.VISITORS.SEARCH,
-      searchParams
-    );
+    const queryParams = new URLSearchParams();
+    
+    if (searchParams.name) queryParams.append('name', searchParams.name);
+    if (searchParams.mobile) queryParams.append('mobile', searchParams.mobile);
+    if (searchParams.purpose) queryParams.append('purpose', searchParams.purpose);
+    
+    const url = `${API_ENDPOINTS.VISITORS.FILTER}${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+    const response = await apiClient.get<VisitorResponse[]>(url);
     return response.data;
   }
 
@@ -96,11 +97,12 @@ export class VisitorsService {
 
   /**
    * Check-out visitor
+   * Uses POST with visitor_id in path, not in body
    */
   async checkOutVisitor(visitorId: string): Promise<VisitorResponse> {
     const response = await apiClient.post<VisitorResponse>(
-      API_ENDPOINTS.VISITORS.CHECK_OUT,
-      { visitor_id: visitorId }
+      API_ENDPOINTS.VISITORS.CHECK_OUT(visitorId),
+      {} // No body needed - visitor_id is in path
     );
     return response.data;
   }
@@ -176,7 +178,7 @@ export class VisitorsService {
     checkedOut: number;
     registered: number;
   }> {
-    const response = await apiClient.get<VisitorResponse[]>(API_ENDPOINTS.VISITORS.LIST);
+    const response = await apiClient.get<VisitorResponse[]>(API_ENDPOINTS.VISITORS.ALL);
     const allVisitors = response.data;
     
     const stats = {
@@ -187,6 +189,15 @@ export class VisitorsService {
     };
     
     return stats;
+  }
+
+  /**
+   * Get all visitor logs (admin/security)
+   * Returns visitor check-in/check-out history
+   */
+  async getVisitorLogs(): Promise<VisitorResponse[]> {
+    const response = await apiClient.get<VisitorResponse[]>(API_ENDPOINTS.VISITORS.LOGS);
+    return response.data;
   }
 }
 

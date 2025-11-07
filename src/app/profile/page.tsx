@@ -13,17 +13,19 @@ import { ArrowLeft, Camera, Save, User, AlertCircle } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, ChangeEvent } from "react";
 import { useAuth } from "@/hooks/api/useAuth";
 import { useUsers } from "@/hooks/api/useUsers";
 import { useBuildingSelection } from "@/hooks/api/useBuildingSelection";
 import { useProgrammeSelection } from "@/hooks/api/useProgrammeSelection";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
 
 export default function ProfilePage() {
   const router = useRouter();
   const { user: authUser, isAuthenticated, isLoading: authLoading, refreshUser } = useAuth();
   const { updateProfile, updateUser, isUpdating, error, clearError } = useUsers();
+  const { success: showSuccess, error: showError, warning: showWarning, ToastContainer } = useToast();
   const { buildingOptions, isLoading: buildingsLoading } = useBuildingSelection();
   const { programmeOptions, isLoading: programmesLoading } = useProgrammeSelection();
   
@@ -37,6 +39,7 @@ export default function ProfilePage() {
   const [assetNumber, setAssetNumber] = useState("");
   const [email, setEmail] = useState("");
   const [selfieData, setSelfieData] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     // Load user data from Azure API
@@ -53,12 +56,37 @@ export default function ProfilePage() {
     }
   }, [authUser]);
 
+  const handleUploadPhotoClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handlePhotoSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showError("Please select a valid image file.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setSelfieData(result);
+      showSuccess("Photo ready to save.");
+    };
+    reader.onerror = () => {
+      showError("Failed to read the selected image. Please try again.");
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = async () => {
     try {
       clearError();
       
       if (!authUser?.id) {
-        alert("User ID not found. Please log in again.");
+        showError("User ID not found. Please log in again.");
         return;
       }
 
@@ -73,15 +101,12 @@ export default function ProfilePage() {
         last_name: lastName,
       };
 
-      console.log("Updating user with data:", userUpdateData);
       let updatedUser = await updateUser(authUser.id, userUpdateData);
       
       if (!updatedUser) {
-        alert("Failed to update name. Please try again.");
+        showError("Failed to update your name. Please try again.");
         return;
       }
-
-      console.log("User name updated successfully, received:", updatedUser);
 
       // Then try to update other fields using the profile endpoint
       // Note: The API may not accept all these fields, but we'll try
@@ -93,30 +118,24 @@ export default function ProfilePage() {
         programme_id: programme || undefined,
         laptop_model: laptopModel || undefined,
         laptop_asset_number: assetNumber || undefined,
+        photo_url: selfieData || undefined,
       };
 
-      console.log("Updating profile with additional data:", profileData);
       updatedUser = await updateProfile(profileData);
       
       if (updatedUser) {
-        console.log("Profile updated successfully, received:", updatedUser);
+        showSuccess("Profile updated successfully.");
       } else {
-        console.warn("Profile update for additional fields returned null, but name was updated");
+        showWarning("Some profile details may not have been saved. Please review your information.");
       }
 
       // Refresh the auth context to get the updated user data
       await refreshUser();
       setIsEditing(false);
-      alert("Profile updated successfully!");
     } catch (error: any) {
-      console.error("Error updating profile:", error);
       const errorMessage = error?.message || error?.data?.detail || "Failed to update profile. Please try again.";
-      alert(`Error: ${errorMessage}`);
+      showError(errorMessage);
     }
-  };
-
-  const handleRetakeSelfie = () => {
-    router.push("/register/camera");
   };
 
   // Show loading state while checking authentication
@@ -136,6 +155,7 @@ export default function ProfilePage() {
 
   return (
     <ProtectedRoute>
+      <ToastContainer />
       <div className="min-h-screen bg-background">
         {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center justify-between sticky top-0 z-10 shadow-sm">
@@ -207,15 +227,24 @@ export default function ProfilePage() {
             {firstName} {lastName}
           </h2>
           <p className="text-sm text-gray-600 mb-3">{email}</p>
-          <Button
-            onClick={handleRetakeSelfie}
-            variant="outline"
-            size="sm"
-            className="flex items-center gap-2"
-          >
-            <Camera className="w-4 h-4" />
-            Update Photo
-          </Button>
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoSelected}
+            />
+            <Button
+              onClick={handleUploadPhotoClick}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <Camera className="w-4 h-4" />
+              Upload Photo
+            </Button>
+          </>
         </div>
 
         {/* Profile Information */}

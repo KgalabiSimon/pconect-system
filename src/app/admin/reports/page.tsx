@@ -21,23 +21,19 @@ import {
   TrendingUp
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useToast } from "@/components/ui/toast";
+import { useAuth } from "@/hooks/api/useAuth";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function ReportsPage() {
-  const router = useRouter();
+  const { success, error: showError, ToastContainer } = useToast();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [reportType, setReportType] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [filterBuilding, setFilterBuilding] = useState("");
   const [filterProgramme, setFilterProgramme] = useState("");
-
-  useEffect(() => {
-    const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
-    if (!isAdminLoggedIn) {
-      router.push("/admin/login");
-    }
-  }, [router]);
 
   const reportTypes = [
     {
@@ -159,7 +155,7 @@ export default function ReportsPage() {
         break;
 
       default:
-        alert("Please select a report type");
+        // Validation handled by UI - this shouldn't happen
         return;
     }
 
@@ -171,11 +167,28 @@ export default function ReportsPage() {
     a.click();
     window.URL.revokeObjectURL(url);
 
-    alert(`${reportTypes.find(r => r.id === type)?.name} downloaded successfully!`);
+    success(`${reportTypes.find(r => r.id === type)?.name} downloaded successfully!`);
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Checking permissions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ProtectedRoute requireAdmin>
+      <ToastContainer />
+      <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -312,5 +325,6 @@ export default function ReportsPage() {
         </Card>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

@@ -10,6 +10,7 @@ export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   headers?: Record<string, string>;
   body?: any;
+  params?: Record<string, string | number | undefined>; // Query parameters
   timeout?: number;
   retries?: number;
   skipAuth?: boolean;
@@ -27,9 +28,15 @@ export class APIClient {
   private baseURL: string;
   private defaultHeaders: Record<string, string>;
   private authToken: string | null = null;
+  private useProxy: boolean;
 
   constructor(baseURL?: string) {
-    this.baseURL = baseURL || API_CONFIG.BASE_URL;
+    const configuredBaseURL = baseURL || API_CONFIG.BASE_URL;
+    
+    // Proxy disabled - using direct API calls (requires CORS configuration on backend)
+    this.useProxy = false;
+    this.baseURL = configuredBaseURL;
+    
     this.defaultHeaders = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -59,11 +66,51 @@ export class APIClient {
   }
 
   /**
+   * Check if a JWT token is expired (without verifying signature)
+   * Returns true if expired, false if valid, null if can't determine
+   */
+  private isTokenExpired(token: string): boolean | null {
+    try {
+      // JWT format: header.payload.signature
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      
+      // Decode payload (base64url decode)
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      
+      // Check expiration
+      if (payload.exp) {
+        const expirationTime = payload.exp * 1000; // Convert to milliseconds
+        const currentTime = Date.now();
+        return currentTime >= expirationTime;
+      }
+      
+      return null; // No expiration claim
+    } catch {
+      return null; // Invalid token format
+    }
+  }
+
+  /**
    * Load authentication token from storage
    */
   private loadAuthToken(): void {
     if (typeof window !== 'undefined') {
-      this.authToken = localStorage.getItem(API_CONFIG.TOKEN_STORAGE_KEY);
+      const storedToken = localStorage.getItem(API_CONFIG.TOKEN_STORAGE_KEY);
+      if (storedToken) {
+        // Check if token is expired
+        const expired = this.isTokenExpired(storedToken);
+        if (expired === true) {
+          // Token is expired, clear it
+          if (API_CONFIG.FEATURES.ENABLE_LOGGING) {
+            console.warn('[API Client] Token expired, clearing from storage');
+          }
+          localStorage.removeItem(API_CONFIG.TOKEN_STORAGE_KEY);
+          this.authToken = null;
+          return;
+        }
+        this.authToken = storedToken;
+      }
     }
   }
 
@@ -95,18 +142,70 @@ export class APIClient {
       method = 'GET',
       headers = {},
       body,
+      params,
       timeout = API_CONFIG.TIMEOUT,
       retries = API_CONFIG.RETRY_ATTEMPTS,
       skipAuth = false,
       suppressErrorLog = false,
     } = options;
 
-    const url = `${this.baseURL}${endpoint}`;
+    // Build URL with query parameters
+    // If using proxy, prepend /api/proxy to the endpoint path
+    let url: string;
+    if (this.useProxy) {
+      // Proxy route expects: /api/proxy/{endpoint}
+      // Remove leading slash from endpoint if present
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
+      url = `/api/proxy/${cleanEndpoint}`;
+    } else {
+      url = `${this.baseURL}${endpoint}`;
+    }
+    
+    if (params) {
+      const searchParams = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          searchParams.append(key, String(value));
+        }
+      });
+      const queryString = searchParams.toString();
+      if (queryString) {
+        url += (url.includes('?') ? '&' : '?') + queryString;
+      }
+    }
+    // Reload token from localStorage before making request (in case it was updated)
+    // This ensures we always have the latest token, especially after login
+    if (typeof window !== 'undefined' && !skipAuth) {
+      const storedToken = localStorage.getItem(API_CONFIG.TOKEN_STORAGE_KEY);
+      // Check if stored token exists and is valid
+      if (storedToken) {
+        const expired = this.isTokenExpired(storedToken);
+        if (expired === true) {
+          // Token expired, clear it
+          localStorage.removeItem(API_CONFIG.TOKEN_STORAGE_KEY);
+          this.authToken = null;
+        } else if (!this.authToken || storedToken !== this.authToken) {
+          // Token is valid, update in-memory token
+          this.authToken = storedToken;
+          if (API_CONFIG.FEATURES.ENABLE_LOGGING) {
+            console.log('[API Client] Token reloaded from localStorage');
+          }
+        }
+      }
+    }
+
     const requestHeaders = { ...this.defaultHeaders, ...headers };
 
     // Add authentication header if token exists and not skipped
     if (this.authToken && !skipAuth) {
       requestHeaders['Authorization'] = `Bearer ${this.authToken}`;
+    } else if (!skipAuth && API_CONFIG.FEATURES.ENABLE_LOGGING) {
+      console.warn('[API Client] No auth token available for request:', {
+        endpoint,
+        hasToken: !!this.authToken,
+        skipAuth,
+        storedToken: typeof window !== 'undefined' ? !!localStorage.getItem(API_CONFIG.TOKEN_STORAGE_KEY) : false,
+      });
     }
 
     // Prepare request options
@@ -114,6 +213,7 @@ export class APIClient {
       method,
       headers: requestHeaders,
       signal: this.createAbortSignal(timeout),
+      redirect: 'follow', // Follow redirects but ensure baseURL uses HTTPS
     };
 
     // Add body for non-GET requests
@@ -143,16 +243,32 @@ export class APIClient {
         });
       }
 
+      // Log validation errors in detail
+      if (response.status === 422 && responseData && typeof responseData === 'object' && 'detail' in responseData) {
+        console.error('[API Validation Error]', {
+          endpoint: `${method} ${url}`,
+          validationErrors: (responseData as { detail: any }).detail,
+        });
+      }
+
       return {
         data: responseData,
         status: response.status,
         headers: response.headers,
         success: response.ok,
       };
-    } catch (error) {
+    } catch (error: any) {
       // Log error in development (unless suppressed for expected errors like 401 fallbacks)
-      if (API_CONFIG.FEATURES.ENABLE_LOGGING && !suppressErrorLog) {
+      // Also suppress 401/403 errors for availability checks (expected for regular users)
+      const shouldSuppress = suppressErrorLog || 
+                            (error?.status === 401 && endpoint.includes('/booking'));
+      
+      if (API_CONFIG.FEATURES.ENABLE_LOGGING && !shouldSuppress) {
         console.error(`[API Error] ${method} ${url}`, error);
+        // For validation errors (422/400), log the details
+        if (error.status === 422 || error.status === 400) {
+          console.error('[API Validation Error Details]:', error.details);
+        }
       }
       throw error;
     }

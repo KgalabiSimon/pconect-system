@@ -5,18 +5,29 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useBooking } from "@/contexts/BookingContext";
 import { useBuildings } from "@/hooks/api/useBuildings";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
 import { ArrowLeft, Building2, Calendar, Check, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 
-export default function BookingsPage() {
+function BookingsPageContent() {
   const router = useRouter();
   const { bookingState, setBuilding, setFloor, setType, setDate, setTime } = useBooking();
-  const { buildings, isLoading: buildingsLoading } = useBuildings();
+  const { buildings, isLoading: buildingsLoading, error: buildingsError, loadBuildings } = useBuildings({ initialLoad: true });
   const [step, setStep] = useState(1);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const { error: showError, ToastContainer } = useToast();
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  
+  // Ensure buildings are loaded
+  useEffect(() => {
+    if (!buildingsLoading && buildings.length === 0 && !buildingsError) {
+      loadBuildings();
+    }
+  }, [buildingsLoading, buildings.length, buildingsError, loadBuildings]);
 
   const floors = ["Ground", "1st", "2nd"] as const;
   const bookingTypes = [
@@ -25,36 +36,52 @@ export default function BookingsPage() {
     { id: "meeting_room" as const, name: "Meeting Room", desc: "Book by the hour" },
   ];
 
+  const clearFormError = (field: string) => {
+    setFormErrors((prev) => {
+      if (!prev[field]) return prev;
+      const updated = { ...prev };
+      delete updated[field];
+      return updated;
+    });
+  };
+
   const handleNext = () => {
+    const errors: Record<string, string> = {};
+
     if (step === 1 && !bookingState.building) {
-      alert("Please select a building");
-      return;
+      errors.building = "Please select a building";
     }
     if (step === 2 && !bookingState.type) {
-      alert("Please select a booking type");
-      return;
+      errors.type = "Please select a booking type";
     }
     if (step === 3 && !bookingState.date) {
-      alert("Please select a date");
-      return;
+      errors.date = "Please select a booking date";
     }
-    // Step 4 is only for meeting rooms - time selection
     if (step === 4 && bookingState.type === "meeting_room") {
       if (!startTime || !endTime) {
-        alert("Please select both start and end time");
-        return;
+        errors.time = "Please select both start and end times";
+      } else if (endTime <= startTime) {
+        errors.time = "End time must be after the start time";
       }
-      // Validate that end time is after start time
-      if (endTime <= startTime) {
-        alert("End time must be after start time");
-        return;
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      const firstError = Object.values(errors)[0];
+      if (firstError) {
+        showError(firstError);
       }
+      return;
+    }
+
+    setFormErrors({});
+
+    if (step === 4 && bookingState.type === "meeting_room") {
       setTime(startTime, endTime);
       router.push("/bookings/availability");
       return;
     }
 
-    // For desk and office, skip time step and go straight to availability after date
     if (step === 3 && bookingState.type !== "meeting_room") {
       router.push("/bookings/availability");
     } else {
@@ -80,6 +107,7 @@ export default function BookingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <ToastContainer />
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
         {step === 1 ? (
@@ -130,11 +158,33 @@ export default function BookingsPage() {
         {step === 1 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-foreground">Select Building</h2>
+            
+            {/* Error Message */}
+            {buildingsError && (
+              <Card className="p-4 bg-red-50 border-red-200">
+                <p className="text-sm text-red-700">{buildingsError}</p>
+              </Card>
+            )}
+            
+            {/* Buildings List */}
+            {buildings.length === 0 && !buildingsLoading && (
+              <Card className="p-6 text-center">
+                <Building2 className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-600 mb-4">No buildings available</p>
+                <Button onClick={() => loadBuildings()} variant="outline">
+                  Retry Loading Buildings
+                </Button>
+              </Card>
+            )}
+            
             <div className="grid grid-cols-2 gap-4">
               {buildings.map((building) => (
                 <Card
                   key={building.id}
-                  onClick={() => setBuilding(building.id)}
+                  onClick={() => {
+                    setBuilding(building.id);
+                    clearFormError("building");
+                  }}
                   className={`p-6 cursor-pointer transition-all ${
                     bookingState.building === building.id
                       ? "border-2 border-primary bg-primary/5"
@@ -168,6 +218,9 @@ export default function BookingsPage() {
                 ))}
               </div>
             </div>
+            {formErrors.building && (
+              <p className="text-sm text-red-600">{formErrors.building}</p>
+            )}
           </div>
         )}
 
@@ -179,7 +232,10 @@ export default function BookingsPage() {
               {bookingTypes.map((type) => (
                 <Card
                   key={type.id}
-                  onClick={() => setType(type.id)}
+                  onClick={() => {
+                    setType(type.id);
+                    clearFormError("type");
+                  }}
                   className={`p-4 cursor-pointer transition-all ${
                     bookingState.type === type.id
                       ? "border-2 border-primary bg-primary/5"
@@ -196,6 +252,9 @@ export default function BookingsPage() {
                 </Card>
               ))}
             </div>
+            {formErrors.type && (
+              <p className="text-sm text-red-600">{formErrors.type}</p>
+            )}
           </div>
         )}
 
@@ -208,7 +267,10 @@ export default function BookingsPage() {
               <Input
                 type="date"
                 value={bookingState.date || ""}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  clearFormError("date");
+                }}
                 min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
                 max={new Date(Date.now() + 172800000).toISOString().split("T")[0]}
                 className="h-14 text-base"
@@ -216,6 +278,9 @@ export default function BookingsPage() {
               <p className="text-sm text-gray-500">
                 Desk bookings must be 24-48 hours in advance
               </p>
+              {formErrors.date && (
+                <p className="text-sm text-red-600">{formErrors.date}</p>
+              )}
             </div>
 
             {/* Summary */}
@@ -242,7 +307,10 @@ export default function BookingsPage() {
                 <label className="text-sm font-medium">Start Time</label>
                 <select
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  onChange={(e) => {
+                    setStartTime(e.target.value);
+                    clearFormError("time");
+                  }}
                   className="w-full h-14 px-4 text-base border border-gray-300 rounded-lg focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="">Select start time</option>
@@ -266,7 +334,10 @@ export default function BookingsPage() {
                 <label className="text-sm font-medium">End Time</label>
                 <select
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
+                  onChange={(e) => {
+                    setEndTime(e.target.value);
+                    clearFormError("time");
+                  }}
                   className="w-full h-14 px-4 text-base border border-gray-300 rounded-lg focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="">Select end time</option>
@@ -305,6 +376,10 @@ export default function BookingsPage() {
               )}
             </div>
 
+            {formErrors.time && (
+              <p className="text-sm text-red-600">{formErrors.time}</p>
+            )}
+
             {/* Summary */}
             <Card className="p-4 bg-blue-50 border-blue-200">
               <h3 className="font-semibold mb-2">Booking Summary</h3>
@@ -338,5 +413,13 @@ export default function BookingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function BookingsPage() {
+  return (
+    <ProtectedRoute>
+      <BookingsPageContent />
+    </ProtectedRoute>
   );
 }

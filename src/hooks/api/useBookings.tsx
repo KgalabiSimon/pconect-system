@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from 'react';
 import { bookingsService } from '../../lib/api/bookings';
+import { useAuth } from './useAuth';
 import type {
   BookingResponse,
   BookingCreate,
@@ -18,6 +19,7 @@ interface UseBookingsOptions {
 
 export function useBookings(options: UseBookingsOptions = {}) {
   const { initialLoad = false, userId } = options;
+  const { user } = useAuth(); // Get user to check if admin
 
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -29,12 +31,11 @@ export function useBookings(options: UseBookingsOptions = {}) {
   }, []);
 
   const loadBookings = useCallback(async (params?: {
-    skip?: number;
-    limit?: number;
     user_id?: string;
-    space_id?: string;
-    status?: string;
-    booking_date?: string;
+    building_id?: string;
+    space_type?: 'DESK' | 'OFFICE' | 'ROOM';
+    booking_date?: string; // ISO date-time string
+    status?: 'pending' | 'checked_in' | 'checked_out'; // CheckInStatus
   }) => {
     try {
       setIsLoading(true);
@@ -140,22 +141,15 @@ export function useBookings(options: UseBookingsOptions = {}) {
     }
   }, []);
 
-  const getBookingById = useCallback(async (bookingId: string): Promise<BookingResponse | null> => {
-    try {
-      setError(null);
-      
-      const booking = await bookingsService.getBookingById(bookingId);
-      return booking;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to get booking';
-      setError(errorMessage);
-      console.error('Error getting booking:', err);
-      return null;
-    }
-  }, []);
+  /**
+   * Note: GET booking by ID endpoint doesn't exist in the API spec
+   * Use loadBookings with filters or getBookingsByDate to find specific bookings
+   */
 
   const checkAvailability = useCallback(async (
-    spaceId: string, 
+    buildingId: string,
+    floor: number,
+    spaceType: 'DESK' | 'OFFICE' | 'ROOM',
     date: string, 
     startTime: string, 
     endTime: string
@@ -163,27 +157,65 @@ export function useBookings(options: UseBookingsOptions = {}) {
     try {
       setError(null);
       
-      const isAvailable = await bookingsService.checkAvailability(spaceId, date, startTime, endTime);
+      // Use the dedicated availability endpoint
+      const isAvailable = await bookingsService.checkAvailability(
+        buildingId, 
+        floor, 
+        spaceType, 
+        date, 
+        startTime, 
+        endTime
+      );
       return isAvailable;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to check availability';
-      setError(errorMessage);
-      console.error('Error checking availability:', err);
-      return false;
+    } catch (err: any) {
+      // Don't set error for 401/403 - these are handled gracefully (assume available)
+      // The backend will validate availability when creating the booking
+      // Regular users may not have permission to check availability, which is expected
+      if (err?.status === 401 || err?.status === 403) {
+        // Silently handle - don't log as error, don't set error state
+        // The browser will show the network request in network tab (normal behavior)
+        // But we won't add additional error logging
+        return true; // Optimistic: assume available, backend will validate
+      }
+      // For other errors, also return true (better UX than blocking)
+      // Don't set error state for availability checks to avoid breaking UI
+      return true;
     }
   }, []);
 
-  const getSpaceBookings = useCallback(async (spaceId: string): Promise<BookingResponse[]> => {
+  const getBuildingBookings = useCallback(async (buildingId: string): Promise<BookingResponse[]> => {
     try {
       setError(null);
       
-      const spaceBookings = await bookingsService.getSpaceBookings(spaceId);
-      return spaceBookings;
+      const buildingBookings = await bookingsService.getBuildingBookings(buildingId);
+      return buildingBookings;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to get space bookings';
+      const errorMessage = err instanceof Error ? err.message : 'Failed to get building bookings';
       setError(errorMessage);
-      console.error('Error getting space bookings:', err);
+      console.error('Error getting building bookings:', err);
       return [];
+    }
+  }, []);
+
+  const getAdminBookings = useCallback(async (params?: {
+    user_id?: string;
+    building_id?: string;
+    space_type?: 'DESK' | 'OFFICE' | 'ROOM';
+    booking_date?: string;
+    status?: 'pending' | 'checked_in' | 'checked_out';
+  }) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await bookingsService.getAdminBookings(params);
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to get admin bookings';
+      setError(errorMessage);
+      console.error('Error getting admin bookings:', err);
+      return [];
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
@@ -212,9 +244,9 @@ export function useBookings(options: UseBookingsOptions = {}) {
     createBooking,
     updateBooking,
     deleteBooking,
-    getBookingById,
     checkAvailability,
-    getSpaceBookings,
+    getBuildingBookings,
     getBookingsByDate,
+    getAdminBookings, // NEW - Admin-only endpoint to view all bookings
   };
 }

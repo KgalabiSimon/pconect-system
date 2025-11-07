@@ -23,7 +23,7 @@ export { ENV_CONFIG, validateEnvConfig, getEnvConfig } from './env';
 
 // API Services
 export { authService } from './auth';
-export { usersService } from './users';
+export { userService } from './users';
 export { buildingsService } from './buildings';
 export { programmesService } from './programmes';
 export { spacesService } from './spaces';

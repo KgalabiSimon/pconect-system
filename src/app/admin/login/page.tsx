@@ -22,25 +22,6 @@ export default function AdminLoginPage() {
   // Verify admin role after login
   useEffect(() => {
     if (justLoggedIn && isAuthenticated && user) {
-      console.log('🔍 Admin login verification:', {
-        isAuthenticated: isAuthenticated,
-        userRole: user?.role || 'not set',
-        userId: user?.id,
-        email: user?.email,
-        name: user ? `${user.first_name} ${user.last_name}` : 'N/A',
-        is_active: user?.is_active
-      });
-      
-      // Check if user has admin role
-      if (user?.role === 'admin') {
-        console.log('✅ Admin role verified, redirecting to dashboard');
-      } else {
-        // User logged in but doesn't have admin role
-        console.warn('⚠️ User logged in but role is not "admin":', user?.role || 'not set');
-        console.log('📝 Note: API will enforce permissions on restricted endpoints');
-        console.log('📝 Some features may not be accessible (e.g., User Management requires admin role)');
-      }
-      
       // Redirect to dashboard (API will enforce permissions)
       router.push("/admin");
       setJustLoggedIn(false);
@@ -69,11 +50,8 @@ export default function AdminLoginPage() {
       }
       // If login fails, error is handled by auth context - no need to log here
       // The 401 from admin login is expected and handled gracefully
-    } catch (error: any) {
-      // Only log if it's not an expected 401 error
-      if (error?.status !== 401 && !error?.isExpected) {
-        console.error("Admin login error:", error);
-      }
+    } catch (err: any) {
+      // Error is handled by auth context and displayed to user
       setIsSubmitting(false);
     }
   };
@@ -88,6 +66,7 @@ export default function AdminLoginPage() {
               src="https://ext.same-assets.com/2434544859/849502017.png"
               alt="P-Connect Logo"
               fill
+              sizes="128px"
               className="object-contain"
             />
           </div>
@@ -107,6 +86,7 @@ export default function AdminLoginPage() {
                 src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTG_O60OjGZ-JvEMg_5BRHor1H_aSpq_oNxXA&s"
                 alt="DSTI Logo"
                 fill
+                sizes="96px"
                 className="object-contain"
               />
             </div>

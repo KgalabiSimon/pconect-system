@@ -26,6 +26,7 @@ export const API_CONFIG = {
     USE_AZURE_API: process.env.NEXT_PUBLIC_USE_AZURE_API === 'true',
     FALLBACK_TO_MOCK: process.env.NEXT_PUBLIC_FALLBACK_TO_MOCK === 'true',
     ENABLE_LOGGING: process.env.NODE_ENV === 'development',
+    USE_PROXY: false, // Disabled - requires CORS configuration on backend
   }
 } as const;
 
@@ -57,6 +58,11 @@ export const API_ENDPOINTS = {
     STATS_COUNT: '/api/v1/users/stats/count',
   },
   
+  // Employees (alias for users, but may have different response format)
+  EMPLOYEES: {
+    LIST: '/employees/', // List all employees (users)
+  },
+  
   // Profile
   PROFILE: {
     UPDATE: '/api/v1/profile/',
@@ -76,8 +82,14 @@ export const API_ENDPOINTS = {
   
   // Spaces
   SPACES: {
-    UPDATE: (id: string) => `/api/v1/buildings/spaces/${id}`,
-    DELETE: (id: string) => `/api/v1/buildings/spaces/${id}`,
+    LIST: '/api/v1/spaces/', // List all spaces (admin)
+    CREATE: '/api/v1/spaces/', // Create space (admin)
+    GET_BY_ID: (id: string) => `/api/v1/spaces/${id}`, // Get space by ID
+    UPDATE_GLOBAL: (id: string) => `/api/v1/spaces/${id}`, // Update space (global endpoint)
+    DELETE_GLOBAL: (id: string) => `/api/v1/spaces/${id}`, // Delete space (global endpoint)
+    // Building-specific endpoints (for backward compatibility)
+    UPDATE: (id: string) => `/api/v1/buildings/spaces/${id}`, // Update space (building-specific)
+    DELETE: (id: string) => `/api/v1/buildings/spaces/${id}`, // Delete space (building-specific)
   },
   
   // Floors
@@ -92,13 +104,15 @@ export const API_ENDPOINTS = {
     DELETE: (id: string) => `/api/v1/buildings/blocks/${id}`,
   },
   
-  // Bookings
+  // Bookings - Updated to match new API spec (singular /booking/)
   BOOKINGS: {
-    LIST: '/api/v1/bookings/',
-    CREATE: '/api/v1/bookings/',
-    GET_BY_ID: (id: string) => `/api/v1/bookings/${id}`,
-    UPDATE: (id: string) => `/api/v1/bookings/${id}`,
-    DELETE: (id: string) => `/api/v1/bookings/${id}`,
+    LIST: '/api/v1/booking/',
+    CREATE: '/api/v1/booking/',
+    UPDATE: (id: string) => `/api/v1/booking/${id}`,
+    DELETE: (id: string) => `/api/v1/booking/${id}`,
+    ADMIN_LIST: '/api/v1/booking/admin',
+    AVAILABILITY: '/api/v1/booking/availability',
+    // Note: GET by ID endpoint doesn't exist in API spec
   },
   
   // Check-ins
@@ -108,25 +122,30 @@ export const API_ENDPOINTS = {
     GET_BY_ID: (id: string) => `/api/v1/checkins/${id}`,
     UPDATE: (id: string) => `/api/v1/checkins/${id}`,
     DELETE: (id: string) => `/api/v1/checkins/${id}`,
-    CHECK_IN: '/api/v1/checkins/checkin',
-    CHECK_OUT: '/api/v1/checkins/checkout',
+    CHECK_IN: '/api/v1/checkin/', // Updated to match actual API endpoint (with trailing slash - backend expects it)
+    CHECK_OUT: '/api/v1/checkin/checkout', // Updated to match actual API endpoint
     USER_HISTORY: (userId: string) => `/api/v1/checkins/user/${userId}`,
     QR_GENERATE: '/api/v1/checkins/qr/generate',
     QR_SCAN: '/api/v1/checkins/qr/scan',
+    VERIFY_QR: '/api/v1/verify-qr/', // New endpoint for QR verification (with trailing slash as per API docs)
+    GET_STATUS: (checkinId: string) => `/api/v1/verify-qr/status/${checkinId}`, // Get check-in status by checkin_id
+    MY_CHECKINS: '/api/v1/checkin/my-checkins', // Get all check-ins (general and booking-linked) for current user
   },
   
   // Visitors
   VISITORS: {
-    LIST: '/api/v1/visitors/',
-    CREATE: '/api/v1/visitors/',
-    GET_BY_ID: (id: string) => `/api/v1/visitors/${id}`,
-    UPDATE: (id: string) => `/api/v1/visitors/${id}`,
-    DELETE: (id: string) => `/api/v1/visitors/${id}`,
-    REGISTER: '/api/v1/visitors/register',
-    SEARCH: '/api/v1/visitors/search',
-    CHECK_IN: '/api/v1/visitors/checkin',
-    CHECK_OUT: '/api/v1/visitors/checkout',
-    BY_PHONE: '/api/v1/visitors/by-phone',
+    ALL: '/api/v1/visitors/all', // Get all visitors (admin/security)
+    FILTER: '/api/v1/visitors/filter', // Filter visitors by name/mobile/purpose (GET with query params)
+    REGISTER: '/api/v1/visitors/register', // Register new visitor
+    CHECK_IN: '/api/v1/visitors/checkin', // Check-in visitor
+    CHECK_OUT: (visitorId: string) => `/api/v1/visitors/checkout/${visitorId}`, // Check-out visitor (POST with visitor_id in path)
+    LOGS: '/api/v1/visitors/logs', // Get all visitor logs (admin/security)
+    GET_BY_ID: (id: string) => `/api/v1/visitors/${id}`, // Get visitor by ID
+    // Legacy endpoints (kept for backward compatibility if needed)
+    LIST: '/api/v1/visitors/all', // Alias for ALL
+    CREATE: '/api/v1/visitors/register', // Alias for REGISTER
+    SEARCH: '/api/v1/visitors/filter', // Alias for FILTER
+    BY_PHONE: '/api/v1/visitors/by-phone', // May not exist in API spec - verify
   },
   
   // Programmes

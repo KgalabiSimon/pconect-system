@@ -94,22 +94,17 @@ export default function RegisterPage() {
         is_active: true,
       };
 
-      console.log("📝 Attempting registration with data:", { ...userData, password: "***" });
       const user = await authService.registerUser(userData);
-      console.log("✅ Registration successful:", user);
 
       if (user && user.id) {
         // Registration successful - navigate to camera page for photo upload
         // Store minimal data in sessionStorage only for photo upload step
         sessionStorage.setItem("pendingPhotoUserId", user.id);
-        console.log("📸 Navigating to camera page for user:", user.id);
         router.push("/register/camera");
       } else {
-        console.error("❌ Registration failed - no user returned");
         setError("Registration failed. Please try again.");
       }
     } catch (err: any) {
-      console.error("❌ Registration error:", err);
       // Extract detailed error message
       let errorMessage = "Registration failed. Please try again.";
       
@@ -124,7 +119,6 @@ export default function RegisterPage() {
         errorMessage = err.message;
       }
       
-      console.error("Error details:", { message: errorMessage, fullError: err });
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);

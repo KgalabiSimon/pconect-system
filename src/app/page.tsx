@@ -227,6 +227,7 @@ export default function Home() {
             src="https://ext.same-assets.com/2434544859/1264356430.png"
             alt="P Connect Logo"
             fill
+            sizes="(max-width: 768px) 96px, 192px"
             className="object-contain"
           />
         </div>
@@ -337,6 +338,7 @@ export default function Home() {
                       src={item.icon}
                       alt={item.title}
                       fill
+                      sizes="64px"
                       className="object-contain"
                     />
                   )}
@@ -399,6 +401,7 @@ export default function Home() {
                 src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTG_O60OjGZ-JvEMg_5BRHor1H_aSpq_oNxXA&s"
                 alt="DSTI Logo"
                 fill
+                sizes="(max-width: 768px) 128px, 160px"
                 className="object-contain"
               />
             </div>

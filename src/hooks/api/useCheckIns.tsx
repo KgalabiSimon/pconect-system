@@ -11,6 +11,7 @@ import type {
   CheckInUpdate,
   QRCodeGenerate,
   QRCodeScan,
+  CheckInStatusResponse,
 } from '../../types/api';
 
 interface UseCheckInsOptions {
@@ -98,9 +99,9 @@ export function useCheckIns(options?: UseCheckInsOptions) {
     setIsUpdating(true);
     setError(null);
     try {
-      const newCheckIn = await checkInsService.checkIn(checkInData);
-      setCheckIns((prev) => [...prev, newCheckIn]);
-      return newCheckIn;
+      // NEW API - returns full CheckInResponse object with qr_code_data
+      const checkInResult = await checkInsService.checkIn(checkInData);
+      return checkInResult;
     } catch (err: any) {
       setError(err.message || 'Failed to check-in');
       return null;
@@ -191,6 +192,75 @@ export function useCheckIns(options?: UseCheckInsOptions) {
     }
   }, []);
 
+  const verifyQR = useCallback(async (checkinId: string, officerId: string) => {
+    setIsUpdating(true);
+    setError(null);
+    try {
+      const result = await checkInsService.verifyQR(checkinId, officerId);
+      return result;
+    } catch (err: any) {
+      setError(err.message || 'Failed to verify QR code');
+      return null;
+    } finally {
+      setIsUpdating(false);
+    }
+  }, []);
+
+  const getCheckInStatus = useCallback(async (checkinId: string) => {
+    setError(null);
+    try {
+      const result = await checkInsService.getCheckInStatus(checkinId);
+      return result;
+    } catch (err: any) {
+      setError(err.message || 'Failed to get check-in status');
+      return null;
+    }
+  }, []);
+
+  const filterCheckIns = useCallback(async (params?: {
+    user_id?: string;
+    visitor_id?: string;
+    building_id?: string;
+    floor?: string;
+    block?: string;
+    programme_id?: string;
+    status?: 'pending' | 'checked_in' | 'checked_out';
+    user_type?: 'employee' | 'visitor';
+    start_date?: string;
+    end_date?: string;
+  }) => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const result = await checkInsService.filterCheckIns(params);
+      return result;
+    } catch (err: any) {
+      if (err?.status === 403 || err?.type === 'AUTHORIZATION_ERROR') {
+        // Expected for roles without list permissions (e.g., security officers)
+        return [];
+      }
+      setError(err.message || 'Failed to filter check-ins');
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const myCheckIns = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await checkInsService.myCheckIns();
+      setCheckIns(result);
+      return result;
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch my check-ins');
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   return {
     checkIns,
     isLoading,
@@ -205,8 +275,12 @@ export function useCheckIns(options?: UseCheckInsOptions) {
     getUserCheckInHistory,
     generateQRCode,
     scanQRCode,
+    verifyQR,
     getActiveCheckIns,
     getCheckInsByDateRange,
+    getCheckInStatus,
+    filterCheckIns,
+    myCheckIns, // NEW - Get all check-ins (general and booking-linked) for current user
     clearError,
   };
 }

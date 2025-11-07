@@ -25,7 +25,7 @@ export class AuthService {
     const response = await apiClient.post<Token>(
       API_ENDPOINTS.AUTH.LOGIN,
       credentials,
-      options
+      { ...options, skipAuth: true } // Login endpoint doesn't require auth
     );
     
     if (response.success && response.data.access_token) {
@@ -41,18 +41,18 @@ export class AuthService {
    */
   async loginAdmin(credentials: AdminLogin): Promise<Token> {
     try {
-      const response = await apiClient.post<Token>(
-        API_ENDPOINTS.AUTH.ADMIN_LOGIN,
+    const response = await apiClient.post<Token>(
+      API_ENDPOINTS.AUTH.ADMIN_LOGIN,
         credentials,
-        { suppressErrorLog: true } // Suppress error logging - 401 is expected for fallback
-      );
-      
-      if (response.success && response.data.access_token) {
-        // Store token in API client
-        apiClient.setAuthToken(response.data.access_token);
-      }
-      
-      return response.data;
+        { suppressErrorLog: true, skipAuth: true } // Login endpoint doesn't require auth
+    );
+    
+    if (response.success && response.data.access_token) {
+      // Store token in API client
+      apiClient.setAuthToken(response.data.access_token);
+    }
+    
+    return response.data;
     } catch (error: any) {
       // For 401 errors, throw a special error that indicates expected failure
       // This allows the calling code to handle it gracefully without logging
@@ -73,7 +73,8 @@ export class AuthService {
   async loginSecurity(credentials: SecurityLogin): Promise<Token> {
     const response = await apiClient.post<Token>(
       API_ENDPOINTS.AUTH.SECURITY_LOGIN,
-      credentials
+      credentials,
+      { skipAuth: true } // Login endpoint doesn't require auth
     );
     
     if (response.success && response.data.access_token) {
@@ -138,7 +139,7 @@ export class AuthService {
   async getCurrentUser(options?: { suppressErrorLog?: boolean }): Promise<UserResponse> {
     const response = await apiClient.get<UserResponse>(
       API_ENDPOINTS.AUTH.ME,
-      options
+      { suppressErrorLog: options?.suppressErrorLog }
     );
     
     return response.data;

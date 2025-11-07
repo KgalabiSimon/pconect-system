@@ -75,9 +75,10 @@ export class UserService {
   /**
    * Get user by ID
    */
-  async getUserById(userId: string): Promise<UserResponse> {
+  async getUserById(userId: string, options?: { suppressErrorLog?: boolean }): Promise<UserResponse> {
     const response = await apiClient.get<UserResponse>(
-      API_ENDPOINTS.USERS.GET_BY_ID(userId)
+      API_ENDPOINTS.USERS.GET_BY_ID(userId),
+      { suppressErrorLog: options?.suppressErrorLog }
     );
     return response.data;
   }
@@ -124,6 +125,15 @@ export class UserService {
       API_ENDPOINTS.PROFILE.UPDATE,
       profileData
     );
+    return response.data;
+  }
+
+  /**
+   * Get all employees (alias for users)
+   * Uses /employees/ endpoint which may be the same as /api/v1/users/
+   */
+  async getEmployees(): Promise<UserResponse[]> {
+    const response = await apiClient.get<UserResponse[]>(API_ENDPOINTS.EMPLOYEES.LIST);
     return response.data;
   }
 }

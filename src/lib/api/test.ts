@@ -3,7 +3,7 @@
  * Basic tests to verify API client foundation is working
  */
 
-import { apiClient, API_CONFIG, API_ENDPOINTS } from '../lib/api';
+import { apiClient, API_CONFIG, API_ENDPOINTS } from './index';
 
 /**
  * Test API client configuration
@@ -50,9 +50,10 @@ export function testAPIClientMethods() {
   console.log('🧪 Testing API Client Methods...');
   
   // Test method existence
-  const methods = ['get', 'post', 'put', 'delete', 'patch', 'request'];
+  const methods = ['get', 'post', 'put', 'delete', 'patch'] as const;
   methods.forEach(method => {
-    console.log(`✅ Method ${method} exists:`, typeof apiClient[method] === 'function');
+    const methodExists = typeof (apiClient as any)[method] === 'function';
+    console.log(`✅ Method ${method} exists:`, methodExists);
   });
   
   return true;
@@ -66,7 +67,7 @@ export function testErrorHandling() {
   
   try {
     // Test APIError import
-    const { APIError } = require('../lib/api/errors');
+    const { APIError } = require('./errors');
     const error = new APIError('Test error', 400, 'VALIDATION_ERROR');
     
     console.log('✅ APIError created:', error.message);

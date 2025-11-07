@@ -208,6 +208,16 @@ export function useVisitors(options?: UseVisitorsOptions) {
     }
   }, []);
 
+  const getVisitorLogs = useCallback(async () => {
+    setError(null);
+    try {
+      return await visitorsService.getVisitorLogs();
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch visitor logs');
+      return [];
+    }
+  }, []);
+
   return {
     visitors,
     isLoading,
@@ -226,6 +236,7 @@ export function useVisitors(options?: UseVisitorsOptions) {
     getVisitorsByHost,
     getVisitorsByDateRange,
     getVisitorStats,
+    getVisitorLogs,
     clearError,
   };
 }

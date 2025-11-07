@@ -40,6 +40,60 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const persistUserData = (userData: UserResponse | null) => {
+    if (typeof window === 'undefined') return;
+    if (userData) {
+      localStorage.setItem('pconnect_user_data', JSON.stringify(userData));
+    } else {
+      localStorage.removeItem('pconnect_user_data');
+    }
+  };
+
+  const persistAuthRole = (role: string | null) => {
+    if (typeof window === 'undefined') return;
+    if (role) {
+      localStorage.setItem('pconnect_auth_role', role);
+    } else {
+      localStorage.removeItem('pconnect_auth_role');
+    }
+  };
+
+  const loadPersistedUser = (): UserResponse | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const stored = localStorage.getItem('pconnect_user_data');
+      if (!stored) return null;
+      return JSON.parse(stored);
+    } catch (err) {
+      console.warn('Failed to load stored user data:', err);
+      return null;
+    }
+  };
+
+  const loadPersistedRole = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('pconnect_auth_role');
+  };
+
+  const setUserState = (userData: UserResponse | null, roleOverride?: string) => {
+    if (!userData) {
+      setUser(null);
+      persistUserData(null);
+      persistAuthRole(null);
+      return;
+    }
+
+    const finalRole = roleOverride || userData.role || loadPersistedRole() || undefined;
+    const finalUser = {
+      ...userData,
+      ...(finalRole ? { role: finalRole } : {}),
+    } as UserResponse;
+
+    setUser(finalUser);
+    persistUserData(finalUser);
+    persistAuthRole(finalRole || null);
+  };
+
   // Initialize auth state on mount
   useEffect(() => {
     initializeAuth();
@@ -56,10 +110,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setToken(storedToken);
         setIsAuthenticated(true);
         
+        const persistedUser = loadPersistedUser();
+        if (persistedUser) {
+          setUserState(persistedUser);
+        }
+
+        // CRITICAL: Sync token to API client so all API calls use it
+        apiClient.setAuthToken(storedToken);
+        console.log('Auth initialized: Token synced to API client');
+        
         // Try to get user data - suppress errors as admin tokens don't work with /auth/me
         try {
           const userData = await authService.getCurrentUser({ suppressErrorLog: true });
-          setUser(userData);
+          setUserState(userData);
         } catch (error: any) {
           // If it's a 401, this might be an admin token - that's okay, don't clear auth
           // Admin tokens don't work with /auth/me but still work for admin endpoints
@@ -67,10 +130,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
             console.log('Token may be admin token (doesn\'t work with /auth/me), keeping auth state');
             // Keep authentication state - user can still access admin endpoints
           } else {
-            console.warn('Failed to get user data, clearing auth:', error);
-            logout();
-          }
+          console.warn('Failed to get user data, clearing auth:', error);
+          logout();
         }
+        }
+      } else {
+        // No stored token - ensure API client doesn't have a stale token
+        apiClient.setAuthToken(null);
       }
     } catch (error) {
       console.error('Auth initialization error:', error);
@@ -94,7 +160,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Get user data - handle errors gracefully
         try {
           const userData = await authService.getCurrentUser();
-          setUser(userData);
+          setUserState(userData);
         } catch (userError) {
           // If getting user data fails, log but don't fail login
           // User data will be fetched on next page load
@@ -128,12 +194,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (tokenData.access_token) {
           setToken(tokenData.access_token);
           setIsAuthenticated(true);
+          persistAuthRole('admin');
           
           // Get user data - admin login tokens may not work with /auth/me
           // Try /auth/me first, if it fails, try regular login to get user data but restore admin token
           try {
             const userData = await authService.getCurrentUser({ suppressErrorLog: true });
-            setUser(userData);
+            setUserState(userData);
           } catch (userError: any) {
             // Admin login tokens don't work with /auth/me endpoint (returns 401)
             // This is expected behavior - admin tokens are for API operations, not user profile
@@ -146,8 +213,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 const regularTokenData = await authService.loginUser({ email, password }, { suppressErrorLog: true });
                 if (regularTokenData.access_token) {
                   // Temporarily use regular token to get user data
-                  const userData = await authService.getCurrentUser({ suppressErrorLog: true });
-                  setUser(userData);
+                const userData = await authService.getCurrentUser({ suppressErrorLog: true });
+                setUserState(userData, 'admin');
                   
                   // Restore admin token (needed for admin endpoints)
                   setToken(adminToken);
@@ -159,7 +226,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 // If regular login also fails, that's okay - user can still access admin endpoints
                 // Just set basic user info from email
                 console.log('Regular login not available for admin account (expected), using basic user info');
-                setUser({
+                setUserState({
                   id: '',
                   email: email,
                   first_name: '',
@@ -167,7 +234,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                   is_active: true,
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString(),
-                } as any);
+                } as any, 'admin');
               }
             } else {
               // Other errors - just log as warning
@@ -192,12 +259,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
           
           if (tokenData.access_token) {
             setToken(tokenData.access_token);
+            // Token is already set in API client by authService.loginUser
             setIsAuthenticated(true);
             
             // Get user data - handle errors gracefully
             try {
               const userData = await authService.getCurrentUser();
-              setUser(userData);
+              setUserState(userData);
             } catch (userError) {
               // If getting user data fails, log but don't fail login
               console.warn('Failed to fetch user data after login:', userError);
@@ -232,13 +300,51 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setToken(tokenData.access_token);
         setIsAuthenticated(true);
         
-        // Get user data - handle errors gracefully
-        try {
-          const userData = await authService.getCurrentUser();
-          setUser(userData);
-        } catch (userError) {
-          // If getting user data fails, log but don't fail login
-          console.warn('Failed to fetch user data after security login:', userError);
+        // CRITICAL: Ensure token is synced to API client
+        apiClient.setAuthToken(tokenData.access_token);
+        console.log('✅ Security login: Token synced to API client');
+        
+        // Security officer tokens don't work with /auth/me endpoint
+        // This is expected behavior - security tokens are for API operations, not user profile
+        // Check if token response includes user data
+        if (tokenData.user && tokenData.user.id) {
+          console.log('✅ Security officer user data from login response:', tokenData.user);
+          setUserState(tokenData.user, tokenData.user.role || 'security');
+        } else {
+          // Try to get user data from /auth/me, but don't fail if it doesn't work
+          try {
+            const userData = await authService.getCurrentUser({ suppressErrorLog: true });
+            setUserState(userData, userData.role || 'security');
+            console.log('✅ Security officer user data retrieved from /auth/me');
+          } catch (userError: any) {
+            // If it's a 401, this is expected - security tokens don't work with /auth/me
+            if (userError?.status === 401) {
+              console.log('ℹ️ Security token doesn\'t work with /auth/me (expected)');
+              console.warn('⚠️ Security officer ID not available - verifyQR may fail');
+              // Set a minimal user object - but we'll need to handle missing ID for verifyQR
+              setUserState({
+                id: '', // Will need to be obtained from API response or another endpoint
+                email: tokenData.user?.email || '',
+                first_name: tokenData.user?.first_name || 'Security',
+                last_name: tokenData.user?.last_name || 'Officer',
+                is_active: true,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              } as any, 'security');
+            } else {
+              // Other errors - log as warning
+              console.warn('Failed to fetch user data after security login:', userError);
+              setUserState({
+                id: '',
+                email: '',
+                first_name: 'Security',
+                last_name: 'Officer',
+                is_active: true,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              } as any, 'security');
+            }
+          }
         }
         
         return true;
@@ -256,7 +362,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = () => {
     authService.logout();
-    setUser(null);
+    setUserState(null);
     setToken(null);
     setIsAuthenticated(false);
     setError(null);
@@ -270,7 +376,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       if (isAuthenticated) {
         const userData = await authService.getCurrentUser({ suppressErrorLog: true });
-        setUser(userData);
+        setUserState(userData);
       }
     } catch (error: any) {
       // If it's a 401, this might be an admin token - don't logout
@@ -279,8 +385,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('Cannot refresh user data - token may be admin token (expected)');
         // Don't logout - admin tokens still work for admin endpoints
       } else {
-        console.error('Failed to refresh user data:', error);
-        logout();
+      console.error('Failed to refresh user data:', error);
+      logout();
       }
     }
   };

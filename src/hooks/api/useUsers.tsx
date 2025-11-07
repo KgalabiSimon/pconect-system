@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../../lib/api/users';
 import type { UserResponse, UserCreate, UserUpdate, UserProfileUpdate } from '../../types/api';
 
@@ -43,10 +43,16 @@ export interface UseUsersReturn {
   // Utilities
   clearError: () => void;
   clearUsers: () => void;
+  getEmployees: () => Promise<UserResponse[]>;
 }
 
 export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
   const { initialLoad = false, defaultParams = {} } = options;
+  const defaultParamsRef = useRef(defaultParams);
+
+  useEffect(() => {
+    defaultParamsRef.current = defaultParams;
+  }, [defaultParams]);
   
   // State
   const [users, setUsers] = useState<UserResponse[]>([]);
@@ -77,7 +83,7 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
       setIsLoading(true);
       setError(null);
       
-      const searchParams = { ...defaultParams, ...params };
+      const searchParams = { ...defaultParamsRef.current, ...params };
       const userList = await userService.getUsers(searchParams);
       setUsers(userList);
       
@@ -102,7 +108,7 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [defaultParams]);
+  }, []);
 
   // Load single user
   const loadUser = useCallback(async (userId: string) => {
@@ -153,13 +159,25 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
       setError(null);
       
       const updatedUser = await userService.updateUser(userId, userData);
-      
-      // Update in users list
-      setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
-      
-      // Update current user if it's the same
+
+      // Update in users list while preserving fields the API does not return
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                ...updatedUser,
+              }
+            : u
+        )
+      );
+
+      // Update current user if it's the same, also preserving existing fields
       if (user && user.id === userId) {
-        setUser(updatedUser);
+        setUser({
+          ...user,
+          ...updatedUser,
+        });
       }
       
       return updatedUser;
@@ -253,6 +271,22 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
     }
   }, []);
 
+  const getEmployees = useCallback(async (): Promise<UserResponse[]> => {
+    try {
+      setError(null);
+      setIsLoading(true);
+      const employees = await userService.getEmployees();
+      return employees;
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to get employees';
+      setError(errorMessage);
+      console.error('Error getting employees:', err);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   return {
     // Data
     users,
@@ -281,5 +315,6 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
     // Utilities
     clearError,
     clearUsers,
+    getEmployees,
   };
 };

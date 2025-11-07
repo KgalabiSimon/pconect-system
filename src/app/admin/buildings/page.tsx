@@ -23,6 +23,8 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/api/useAuth";
 import { useBuildings } from "@/hooks/api/useBuildings";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { BuildingResponse, BuildingCreate, BuildingUpdate } from "@/types/api";
 
 export default function BuildingManagementPage() {
@@ -44,6 +46,10 @@ export default function BuildingManagementPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<BuildingResponse | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [buildingToDelete, setBuildingToDelete] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const { success, error: showError, ToastContainer } = useToast();
 
   const [formData, setFormData] = useState({
     building_code: "",
@@ -79,19 +85,28 @@ export default function BuildingManagementPage() {
     building.building_code.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleDeleteBuilding = async (buildingId: string) => {
+  const handleDeleteClick = (buildingId: string) => {
+    setBuildingToDelete(buildingId);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!buildingToDelete) return;
+
     try {
-      if (confirm("Are you sure you want to delete this building?")) {
-        const success = await deleteBuilding(buildingId);
-        if (success) {
-          alert("Building deleted successfully!");
-        } else {
-          alert("Failed to delete building. Please try again.");
-        }
+      const deleted = await deleteBuilding(buildingToDelete);
+      if (deleted) {
+        success("Building deleted successfully!");
+        loadBuildings(); // Reload buildings list
+      } else {
+        showError("Failed to delete building. Please try again.");
       }
-    } catch (error) {
-      console.error("Error deleting building:", error);
-      alert("Failed to delete building. Please try again.");
+    } catch (err: any) {
+      const errorMessage = err?.message || "Failed to delete building. Please try again.";
+      showError(errorMessage);
+    } finally {
+      setShowDeleteConfirm(false);
+      setBuildingToDelete(null);
     }
   };
 
@@ -119,8 +134,34 @@ export default function BuildingManagementPage() {
   };
 
   const handleSaveNewBuilding = async () => {
+    setFormErrors({});
+    clearError();
+
+    // Validate form
+    const newErrors: Record<string, string> = {};
+    if (!formData.building_code.trim()) {
+      newErrors.building_code = "Building code is required";
+    }
+    if (!formData.name.trim()) {
+      newErrors.name = "Building name is required";
+    }
+    if (!formData.address.trim()) {
+      newErrors.address = "Address is required";
+    }
+    if (formData.floors_count < 1) {
+      newErrors.floors_count = "Floors count must be at least 1";
+    }
+    if (formData.blocks_count < 1) {
+      newErrors.blocks_count = "Blocks count must be at least 1";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      showError("Please fill in all required fields correctly");
+      return;
+    }
+
     try {
-      clearError();
       const newBuilding: BuildingCreate = {
         building_code: formData.building_code,
         name: formData.name,
@@ -130,38 +171,72 @@ export default function BuildingManagementPage() {
       };
       const createdBuilding = await createBuilding(newBuilding);
       if (createdBuilding) {
-        alert("Building added successfully!");
+        success("Building added successfully!");
         setShowAddModal(false);
+        setFormData({
+          building_code: "",
+          name: "",
+          address: "",
+          floors_count: 1,
+          blocks_count: 1,
+        });
+        setFormErrors({});
         loadBuildings(); // Reload buildings to show the new one
       } else {
-        alert("Failed to add building. Please try again.");
+        showError("Failed to add building. Please try again.");
       }
-    } catch (error: any) {
-      console.error("Add building error:", error);
-      // Extract detailed error message
+    } catch (err: any) {
       let errorMessage = "Failed to add building. Please try again.";
-      if (error?.details?.detail) {
-        if (Array.isArray(error.details.detail)) {
+      
+      if (err?.details?.detail) {
+        if (Array.isArray(err.details.detail)) {
           // Handle validation errors
-          const validationErrors = error.details.detail.map((e: any) => 
-            `${e.loc?.join('.') || 'Field'}: ${e.msg}`
-          ).join('\n');
-          errorMessage = `Validation errors:\n${validationErrors}`;
+          const validationErrors: Record<string, string> = {};
+          err.details.detail.forEach((e: any) => {
+            const field = e.loc?.slice(-1)[0] || 'unknown';
+            validationErrors[field] = e.msg;
+          });
+          setFormErrors(validationErrors);
+          errorMessage = "Please fix the validation errors below";
         } else {
-          errorMessage = error.details.detail;
+          errorMessage = err.details.detail;
         }
-      } else if (error?.message) {
-        errorMessage = error.message;
+      } else if (err?.message) {
+        errorMessage = err.message;
       }
-      alert(errorMessage);
+      
+      showError(errorMessage);
     }
   };
 
   const handleSaveEditBuilding = async () => {
-    try {
-      clearError();
-      if (!selectedBuilding) return;
+    if (!selectedBuilding) return;
 
+    setFormErrors({});
+    clearError();
+
+    // Validate form
+    const newErrors: Record<string, string> = {};
+    if (!formData.name.trim()) {
+      newErrors.name = "Building name is required";
+    }
+    if (!formData.address.trim()) {
+      newErrors.address = "Address is required";
+    }
+    if (formData.floors_count < 1) {
+      newErrors.floors_count = "Floors count must be at least 1";
+    }
+    if (formData.blocks_count < 1) {
+      newErrors.blocks_count = "Blocks count must be at least 1";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      showError("Please fill in all required fields correctly");
+      return;
+    }
+
+    try {
       const updatedBuildingData: BuildingUpdate = {
         name: formData.name,
         address: formData.address,
@@ -171,15 +246,34 @@ export default function BuildingManagementPage() {
 
       const updatedBuilding = await updateBuilding(selectedBuilding.id, updatedBuildingData);
       if (updatedBuilding) {
-        alert("Building updated successfully!");
+        success("Building updated successfully!");
         setShowEditModal(false);
+        setSelectedBuilding(null);
+        setFormErrors({});
         loadBuildings(); // Reload buildings to show the updated one
       } else {
-        alert("Failed to update building. Please try again.");
+        showError("Failed to update building. Please try again.");
       }
-    } catch (error) {
-      console.error("Edit building error:", error);
-      alert("Failed to update building. Please try again.");
+    } catch (err: any) {
+      let errorMessage = "Failed to update building. Please try again.";
+      
+      if (err?.details?.detail) {
+        if (Array.isArray(err.details.detail)) {
+          const validationErrors: Record<string, string> = {};
+          err.details.detail.forEach((e: any) => {
+            const field = e.loc?.slice(-1)[0] || 'unknown';
+            validationErrors[field] = e.msg;
+          });
+          setFormErrors(validationErrors);
+          errorMessage = "Please fix the validation errors below";
+        } else {
+          errorMessage = err.details.detail;
+        }
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+      
+      showError(errorMessage);
     }
   };
 
@@ -219,6 +313,20 @@ export default function BuildingManagementPage() {
 
   return (
     <ProtectedRoute>
+      <ToastContainer />
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setBuildingToDelete(null);
+        }}
+        title="Delete Building"
+        message="Are you sure you want to delete this building? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
       <div className="min-h-screen bg-gray-50">
         {/* Error Message */}
         {error && (
@@ -302,7 +410,7 @@ export default function BuildingManagementPage() {
                       variant="ghost"
                       size="icon"
                       className="text-gray-600 hover:text-red-600"
-                      onClick={() => handleDeleteBuilding(building.id)}
+                      onClick={() => handleDeleteClick(building.id)}
                     >
                       <Trash2 className="w-5 h-5" />
                     </Button>
@@ -383,33 +491,51 @@ export default function BuildingManagementPage() {
                   <Input
                     type="text"
                     value={formData.building_code}
-                    onChange={(e) => setFormData({ ...formData, building_code: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, building_code: e.target.value });
+                      setFormErrors({ ...formErrors, building_code: "" });
+                    }}
                     placeholder="BLD-001"
-                    className="h-10"
+                    className={`h-10 ${formErrors.building_code ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.building_code && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.building_code}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Building Name</label>
                   <Input
                     type="text"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      setFormErrors({ ...formErrors, name: "" });
+                    }}
                     placeholder="Building 41"
-                    className="h-10"
+                    className={`h-10 ${formErrors.name ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.name && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                   <Input
                     type="text"
                     value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      setFormErrors({ ...formErrors, address: "" });
+                    }}
                     placeholder="123 Innovation Drive, Pretoria"
-                    className="h-10"
+                    className={`h-10 ${formErrors.address ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.address && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.address}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Number of Floors</label>
@@ -417,10 +543,16 @@ export default function BuildingManagementPage() {
                     type="number"
                     min="1"
                     value={formData.floors_count}
-                    onChange={(e) => setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 })}
-                    className="h-10"
+                    onChange={(e) => {
+                      setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, floors_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.floors_count ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.floors_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.floors_count}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Number of Blocks</label>
@@ -428,10 +560,16 @@ export default function BuildingManagementPage() {
                     type="number"
                     min="1"
                     value={formData.blocks_count}
-                    onChange={(e) => setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 })}
-                    className="h-10"
+                    onChange={(e) => {
+                      setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, blocks_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.blocks_count ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.blocks_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.blocks_count}</p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3 mt-6">
@@ -482,22 +620,34 @@ export default function BuildingManagementPage() {
                   <Input
                     type="text"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      setFormErrors({ ...formErrors, name: "" });
+                    }}
                     placeholder="Building 41"
-                    className="h-10"
+                    className={`h-10 ${formErrors.name ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.name && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
                   <Input
                     type="text"
                     value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      setFormErrors({ ...formErrors, address: "" });
+                    }}
                     placeholder="123 Innovation Drive, Pretoria"
-                    className="h-10"
+                    className={`h-10 ${formErrors.address ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.address && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.address}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Number of Floors</label>
@@ -505,10 +655,16 @@ export default function BuildingManagementPage() {
                     type="number"
                     min="1"
                     value={formData.floors_count}
-                    onChange={(e) => setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 })}
-                    className="h-10"
+                    onChange={(e) => {
+                      setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, floors_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.floors_count ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.floors_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.floors_count}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Number of Blocks</label>
@@ -516,10 +672,16 @@ export default function BuildingManagementPage() {
                     type="number"
                     min="1"
                     value={formData.blocks_count}
-                    onChange={(e) => setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 })}
-                    className="h-10"
+                    onChange={(e) => {
+                      setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, blocks_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.blocks_count ? "border-red-500" : ""}`}
                     required
                   />
+                  {formErrors.blocks_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.blocks_count}</p>
+                  )}
                 </div>
               </form>
 
