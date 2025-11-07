@@ -32,6 +32,9 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
+import { useVisitors } from "@/hooks/api/useVisitors";
+import { useUsers } from "@/hooks/api/useUsers";
+import { AlertCircle } from "lucide-react";
 
 interface Employee {
   id: string;
@@ -62,6 +65,9 @@ interface VisitorFormData {
 }
 
 export default function VisitorKioskPage() {
+  const { registerVisitor, isLoading: visitorLoading, error: visitorError, clearError: clearVisitorError } = useVisitors();
+  const { searchUsers, isLoading: usersLoading } = useUsers();
+  
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<VisitorFormData>({
     visitPurpose: "",
@@ -83,12 +89,17 @@ export default function VisitorKioskPage() {
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState("");
   const [employeeSearchResults, setEmployeeSearchResults] = useState<Employee[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null); // Employee search error
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null); // Camera error
+  const [isStartingCamera, setIsStartingCamera] = useState(false); // Camera loading state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [currentDateTime, setCurrentDateTime] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [idleTimeout, setIdleTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(10);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -126,17 +137,37 @@ export default function VisitorKioskPage() {
 
   // Idle timeout handler (2 minutes)
   useEffect(() => {
+    if (showSuccess || currentStep === 1) {
+      setShowIdleWarning(false);
+      return;
+    }
+
     const resetIdleTimer = () => {
       if (idleTimeout) clearTimeout(idleTimeout);
+      setShowIdleWarning(false); // Clear warning when timer resets
+      setIdleCountdown(10);
+      
       const timeout = setTimeout(() => {
         if (!showSuccess && currentStep > 1) {
-          if (confirm("Are you still there? The form will reset due to inactivity.")) {
-            // User clicked OK, give them more time
-            resetIdleTimer();
-          } else {
-            // Reset to step 1
-            handleReset();
-          }
+          // Show warning modal with countdown
+          setShowIdleWarning(true);
+          setIdleCountdown(10);
+          
+          // Countdown timer
+          const countdownInterval = setInterval(() => {
+            setIdleCountdown((prev) => {
+              if (prev <= 1) {
+                clearInterval(countdownInterval);
+                setShowIdleWarning(false);
+                handleReset();
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+          
+          // Clean up interval when component unmounts or warning is dismissed
+          return () => clearInterval(countdownInterval);
         }
       }, 2 * 60 * 1000); // 2 minutes
       setIdleTimeout(timeout);
@@ -153,21 +184,54 @@ export default function VisitorKioskPage() {
   useEffect(() => {
     if (employeeSearchQuery.length < 2) {
       setEmployeeSearchResults([]);
+      setIsSearching(false);
+      setSearchError(null); // Clear error when query is too short
       return;
     }
 
-    const debounceTimer = setTimeout(() => {
-      setIsSearching(true);
-      // Simulate API call
-      const results = sampleEmployees.filter((emp) =>
-        emp.fullName.toLowerCase().includes(employeeSearchQuery.toLowerCase())
-      );
-      setEmployeeSearchResults(results);
-      setIsSearching(false);
+    setIsSearching(true);
+    setSearchError(null); // Clear previous errors
+    let isCancelled = false;
+    
+    const debounceTimer = setTimeout(async () => {
+      try {
+        // Use searchUsers API instead of loadUsers to avoid infinite loop
+        // searchUsers is optimized for this use case
+        const searchResults = await searchUsers(employeeSearchQuery, 50);
+        
+        // Check if this effect was cancelled (query changed)
+        if (isCancelled) return;
+        
+        // Map to employee format
+        const results = searchResults.map((user: any) => ({
+          id: user.id,
+          fullName: `${user.first_name} ${user.last_name}`,
+          department: user.programme_id || "Unknown",
+          phoneExt: user.phone,
+        }));
+        
+        setEmployeeSearchResults(results);
+        setSearchError(null); // Clear error on success
+      } catch (error: any) {
+        // Only set error if not cancelled
+        if (!isCancelled) {
+          const errorMessage = error?.message || 'Unable to search employees. Please try again.';
+          setSearchError(errorMessage);
+          setEmployeeSearchResults([]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsSearching(false);
+        }
+      }
     }, 250);
 
-    return () => clearTimeout(debounceTimer);
-  }, [employeeSearchQuery]);
+    return () => {
+      isCancelled = true;
+      clearTimeout(debounceTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeSearchQuery]); // Only depend on search query to prevent infinite loop
 
   // Auto-reset after success (30 seconds)
   useEffect(() => {
@@ -206,6 +270,9 @@ export default function VisitorKioskPage() {
     setEmployeeSearchResults([]);
     setShowSuccess(false);
     setErrors({});
+    setSearchError(null);
+    setCameraError(null);
+    setShowIdleWarning(false);
     if (successTimeoutRef.current) {
       clearTimeout(successTimeoutRef.current);
     }
@@ -237,14 +304,19 @@ export default function VisitorKioskPage() {
 
   // Camera functions
   const startCamera = async () => {
+    setCameraError(null); // Clear previous errors
+    setIsStartingCamera(true); // Show loading state
+    
     try {
-      console.log("📸 Requesting camera access...");
-
       // Stop any existing stream first
       if (streamRef.current) {
-        console.log("Stopping existing stream...");
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+      }
+
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera API not supported in this browser. Please use a modern browser.");
       }
 
       // Request camera with specific constraints for front camera
@@ -258,129 +330,218 @@ export default function VisitorKioskPage() {
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      console.log("✅ Camera access granted");
-      console.log("Stream active:", stream.active);
-      console.log("Video tracks:", stream.getVideoTracks().length);
+      streamRef.current = stream;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        streamRef.current = stream;
+      // Show camera UI first so the video element is rendered
+      setShowCamera(true);
+      setCameraError(null);
 
-        // Wait for video metadata and start playing
-        await new Promise<void>((resolve) => {
-          if (videoRef.current) {
-            videoRef.current.onloadedmetadata = async () => {
-              console.log("✅ Video metadata loaded");
-              console.log("Video dimensions:", videoRef.current?.videoWidth, "x", videoRef.current?.videoHeight);
+      // Wait for React to render the video element
+      // Use requestAnimationFrame to ensure DOM is updated
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          setTimeout(() => resolve(), 100);
+        });
+      });
 
-              try {
-                await videoRef.current?.play();
-                console.log("✅ Video is playing");
-                console.log("Video readyState:", videoRef.current?.readyState);
-                // Wait a bit for the first frame to be available
-                setTimeout(() => resolve(), 500);
-              } catch (playError) {
-                console.error("❌ Play error:", playError);
+      // Now the video element should be available
+      if (!videoRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setShowCamera(false);
+        throw new Error("Video element not available after rendering");
+      }
+
+      // Set the stream to the video element
+      videoRef.current.srcObject = stream;
+
+      // Wait for video metadata and start playing
+      await new Promise<void>((resolve, reject) => {
+        if (!videoRef.current) {
+          reject(new Error("Video element not available"));
+          return;
+        }
+
+        const video = videoRef.current;
+        let resolved = false;
+
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', onLoadedMetadata);
+          video.removeEventListener('error', onError);
+        };
+
+        const onLoadedMetadata = async () => {
+          if (resolved) return;
+          try {
+            await video.play();
+            // Wait a bit for the first frame to be available
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                cleanup();
                 resolve();
               }
-            };
+            }, 500);
+          } catch (playError) {
+            if (!resolved) {
+              resolved = true;
+              cleanup();
+              setCameraError("Camera is ready but video playback failed. Please try again.");
+              reject(playError);
+            }
           }
-        });
+        };
 
-        setShowCamera(true);
-      }
+        const onError = () => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            setCameraError("Failed to load camera feed. Please try again.");
+            reject(new Error("Video load error"));
+          }
+        };
+
+        video.addEventListener('loadedmetadata', onLoadedMetadata);
+        video.addEventListener('error', onError);
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            setCameraError("Camera took too long to load. Please try again.");
+            reject(new Error("Camera timeout"));
+          }
+        }, 10000);
+      });
+
+      // Success - camera is ready
+      setIsStartingCamera(false);
     } catch (error) {
-      console.error("❌ Camera error:", error);
+      setIsStartingCamera(false);
+      let errorMessage = "Unable to access camera. Please ensure camera permissions are granted.";
+      
       if (error instanceof Error) {
-        if (error.name === "NotAllowedError") {
-          alert("Camera permission denied. Please allow camera access in your browser settings and try again.");
-        } else if (error.name === "NotFoundError") {
-          alert("No camera found on this device. Please use a device with a camera.");
-        } else if (error.name === "NotReadableError") {
-          alert("Camera is already in use by another application. Please close other apps and try again.");
-        } else {
-          alert(`Unable to access camera: ${error.message}. Please check your browser settings.`);
+        if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+          errorMessage = "Camera permission denied. Please allow camera access in your browser settings and try again.";
+        } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+          errorMessage = "No camera found on this device. Please use a device with a camera.";
+        } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+          errorMessage = "Camera is already in use by another application. Please close other apps and try again.";
+        } else if (error.name === "OverconstrainedError" || error.name === "ConstraintNotSatisfiedError") {
+          errorMessage = "Camera doesn't support the required settings. Please try again.";
+        } else if (error.message) {
+          errorMessage = `Unable to access camera: ${error.message}. Please check your browser settings.`;
         }
-      } else {
-        alert("Unable to access camera. Please ensure camera permissions are granted.");
       }
+      
+      setCameraError(errorMessage);
       setShowCamera(false);
     }
   };
 
   const capturePhoto = () => {
-    console.log("📸 Attempting to capture photo...");
+    // Clear previous photo errors
+    const newErrors = { ...errors, photoUrl: "" };
+    setErrors(newErrors);
+    setCameraError(null);
 
-    if (!videoRef.current || !canvasRef.current) {
-      console.error("❌ Video or canvas ref not available");
-      alert("Unable to capture photo. Please try again.");
+    if (!videoRef.current) {
+      const errorMsg = "Video element not found. Please try again.";
+      setErrors({ ...newErrors, photoUrl: errorMsg });
+      return;
+    }
+
+    if (!canvasRef.current) {
+      const errorMsg = "Canvas element not found. Please try again.";
+      setErrors({ ...newErrors, photoUrl: errorMsg });
       return;
     }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
-    // Check if video is ready
-    console.log("Video readyState:", video.readyState);
-    console.log("Video dimensions:", video.videoWidth, "x", video.videoHeight);
-    console.log("Video paused:", video.paused);
-
+    // Check if video is ready (HAVE_CURRENT_DATA = 2, HAVE_ENOUGH_DATA = 4)
     if (video.readyState < 2) {
-      console.error("❌ Video not ready. ReadyState:", video.readyState);
-      alert("Video is not ready. Please wait a moment and try again.");
+      const errorMsg = "Video is not ready. Please wait a moment and try again.";
+      setErrors({ ...newErrors, photoUrl: errorMsg });
       return;
     }
 
     if (video.videoWidth === 0 || video.videoHeight === 0) {
-      console.error("❌ Video has no dimensions");
-      alert("Camera feed not loaded properly. Please close and reopen the camera.");
+      const errorMsg = "Camera feed not loaded properly. Please close and reopen the camera.";
+      setErrors({ ...newErrors, photoUrl: errorMsg });
       return;
     }
 
     // Set canvas dimensions to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    console.log("Canvas dimensions set to:", canvas.width, "x", canvas.height);
 
     const ctx = canvas.getContext("2d");
-    if (ctx) {
+    if (!ctx) {
+      const errorMsg = "Unable to get canvas context. Please try again.";
+      setErrors({ ...newErrors, photoUrl: errorMsg });
+      return;
+    }
+
+    try {
       // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Mirror the image (selfie mode)
+      // Draw the video frame to canvas
+      // CSS transform on video doesn't affect canvas drawing - we draw the raw video stream
+      // For front camera, we mirror it to match what user sees (mirror effect)
       ctx.save();
       ctx.scale(-1, 1);
       ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
       ctx.restore();
 
-      console.log("✅ Image drawn to canvas");
+      // Convert canvas to base64 data URL (API-compatible format)
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+      
+      // Validate the data URL
+      if (!dataUrl || dataUrl.length < 100 || !dataUrl.startsWith("data:image/jpeg")) {
+        const errorMsg = "Failed to generate photo data. Please try again.";
+        setErrors({ ...newErrors, photoUrl: errorMsg });
+        return;
+      }
 
-      // Convert canvas to blob
+      // Store the photo immediately (don't wait for blob)
+      setFormData({ 
+        ...formData, 
+        photoUrl: dataUrl, // Base64 data URL - works for both display and API
+        photoBlob: null // Will be created if needed
+      });
+      
+      // Clear any errors
+      setErrors({ ...newErrors, photoUrl: "" });
+      
+      // Stop the camera
+      stopCamera();
+
+      // Create blob asynchronously (non-blocking)
       canvas.toBlob((blob) => {
         if (blob) {
-          const url = URL.createObjectURL(blob);
-          console.log("✅ Blob created, size:", blob.size, "bytes");
-          setFormData({ ...formData, photoUrl: url, photoBlob: blob });
-          setErrors({ ...errors, photoUrl: "" });
-          console.log("✅ Photo captured successfully");
-          stopCamera();
-        } else {
-          console.error("❌ Failed to create blob");
-          alert("Failed to capture photo. Please try again.");
+          setFormData((prevData) => ({ 
+            ...prevData, 
+            photoBlob: blob 
+          }));
         }
       }, "image/jpeg", 0.95);
-    } else {
-      console.error("❌ Could not get canvas context");
-      alert("Unable to capture photo. Please try again.");
+      
+    } catch (error) {
+      const errorMsg = error instanceof Error 
+        ? `Failed to capture photo: ${error.message}` 
+        : "Failed to capture photo. Please try again.";
+      setErrors({ ...newErrors, photoUrl: errorMsg });
     }
   };
 
   const stopCamera = () => {
     if (streamRef.current) {
-      console.log("🛑 Stopping camera stream");
       streamRef.current.getTracks().forEach((track) => {
         track.stop();
-        console.log("Stopped track:", track.kind);
       });
       streamRef.current = null;
     }
@@ -388,14 +549,14 @@ export default function VisitorKioskPage() {
       videoRef.current.srcObject = null;
     }
     setShowCamera(false);
+    setCameraError(null); // Clear camera error when stopping
   };
 
   const retakePhoto = () => {
-    // Clean up old photo URL
-    if (formData.photoUrl) {
-      URL.revokeObjectURL(formData.photoUrl);
-    }
+    // Clean up old photo (data URLs don't need revoking, but clear the blob if it exists)
+    // Note: Data URLs are just strings, no cleanup needed
     setFormData({ ...formData, photoUrl: "", photoBlob: null });
+    setErrors({ ...errors, photoUrl: "" }); // Clear any photo errors
     startCamera();
   };
 
@@ -457,25 +618,58 @@ export default function VisitorKioskPage() {
     if (!validateStep(4)) return;
 
     setIsSubmitting(true);
+    clearVisitorError();
+    setErrors({ ...errors, submission: "" }); // Clear submission errors
 
     try {
-      // Simulate API submission
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Prepare visitor data for Azure API
+      // Note: API expects 'purpose' not 'visit_purpose', and 'other_reason' for other visits
+      const visitorData = {
+        first_name: formData.firstName,
+        last_name: formData.surname,
+        company: formData.company || undefined, // Optional field
+        mobile: formData.mobile,
+        purpose: formData.visitPurpose === "EmployeeVisit" 
+          ? `Visiting ${formData.employeeName}` 
+          : formData.otherReason, // Required: 'purpose' field
+        host_employee_id: formData.employeeId || undefined, // Optional
+        host_employee_name: formData.employeeName || undefined, // Optional
+        floor: formData.floor || undefined, // Optional
+        block: formData.block || undefined, // Optional
+        other_reason: formData.visitPurpose === "Other" ? formData.otherReason : undefined, // Optional
+        has_weapons: formData.hasWeapons === "yes",
+        weapon_details: formData.hasWeapons === "yes" ? formData.weaponDetails : undefined,
+        photo_url: formData.photoUrl || undefined, // Optional - In production, upload photo first and get URL
+      };
 
-      // In production, you would:
-      // 1. Upload photo: POST /api/uploads
-      // 2. Submit registration: POST /api/visitors/registrations
+      // Register visitor with Azure API
+      const newVisitor = await registerVisitor(visitorData);
 
-      console.log("Visitor registration submitted:", {
-        ...formData,
-        timestamp: new Date().toISOString(),
-        deviceId: localStorage.getItem("kioskDeviceId") || "KIOSK-001",
-      });
-
-      setShowSuccess(true);
-    } catch (error) {
-      console.error("Submission error:", error);
-      alert("Failed to submit registration. Please try again.");
+      if (newVisitor) {
+        setShowSuccess(true);
+      } else {
+        // If registerVisitor returns null, it means there was an error
+        // The error should be in visitorError from the hook
+        // But we'll also set a fallback error
+        setErrors({ ...errors, submission: "Failed to submit registration. Please check the error message above and try again." });
+      }
+    } catch (error: any) {
+      // Handle specific error types
+      let errorMessage = "Failed to submit registration. Please try again.";
+      
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (error?.response?.data?.detail) {
+        // Handle API validation errors
+        const detail = error.response.data.detail;
+        if (Array.isArray(detail)) {
+          errorMessage = detail.map((err: any) => err.msg).join(", ");
+        } else {
+          errorMessage = detail;
+        }
+      }
+      
+      setErrors({ ...errors, submission: errorMessage });
     } finally {
       setIsSubmitting(false);
     }
@@ -523,6 +717,59 @@ export default function VisitorKioskPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-4 md:p-8">
+      {/* Idle Warning Modal */}
+      {showIdleWarning && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-md p-6">
+            <div className="text-center">
+              <AlertTriangle className="w-16 h-16 text-amber-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                Are you still there?
+              </h2>
+              <p className="text-gray-600 mb-4">
+                The form will reset in <span className="font-bold text-red-600">{idleCountdown}</span> seconds due to inactivity.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => {
+                    setShowIdleWarning(false);
+                    setIdleCountdown(10);
+                  }}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  Continue
+                </Button>
+                <Button
+                  onClick={handleReset}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Reset Form
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {visitorError && (
+        <div className="max-w-4xl mx-auto mb-4">
+          <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg">
+            <div className="flex items-center gap-2 text-red-700">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm">{visitorError}</span>
+              <button
+                onClick={clearVisitorError}
+                className="ml-auto text-red-500 hover:text-red-700"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="max-w-4xl mx-auto mb-6">
         <Card className="p-6">
@@ -618,7 +865,10 @@ export default function VisitorKioskPage() {
                   type="text"
                   placeholder="Search employee name..."
                   value={employeeSearchQuery}
-                  onChange={(e) => setEmployeeSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setEmployeeSearchQuery(e.target.value);
+                    setSearchError(null); // Clear error when user types
+                  }}
                   className="pl-12 h-16 text-lg"
                   disabled={formData.visitPurpose === "Other"}
                 />
@@ -628,6 +878,22 @@ export default function VisitorKioskPage() {
                   </div>
                 )}
               </div>
+              
+              {/* Search Error Message */}
+              {searchError && (
+                <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg">
+                  <div className="flex items-center gap-2 text-red-700">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    <span className="text-sm">{searchError}</span>
+                    <button
+                      onClick={() => setSearchError(null)}
+                      className="ml-auto text-red-500 hover:text-red-700"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Search Results */}
               {employeeSearchResults.length > 0 && formData.visitPurpose !== "Other" && (
@@ -929,14 +1195,48 @@ export default function VisitorKioskPage() {
                   Visitor Photo *
                 </Label>
 
+                {/* Camera Error Message */}
+                {cameraError && (
+                  <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg mb-3">
+                    <div className="flex items-center gap-2 text-red-700">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                      <span className="text-sm flex-1">{cameraError}</span>
+                      <button
+                        onClick={() => setCameraError(null)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <Button
+                      onClick={startCamera}
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 w-full"
+                    >
+                      Try Again
+                    </Button>
+                  </div>
+                )}
+
                 {!formData.photoUrl && !showCamera && (
                   <div className="space-y-3">
                     <Button
                       onClick={startCamera}
-                      className="w-full h-20 text-lg bg-blue-600 hover:bg-blue-700"
+                      disabled={isStartingCamera}
+                      className="w-full h-20 text-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Camera className="w-6 h-6 mr-3" />
-                      Take Photo
+                      {isStartingCamera ? (
+                        <>
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mr-3" />
+                          Starting Camera...
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-6 h-6 mr-3" />
+                          Take Photo
+                        </>
+                      )}
                     </Button>
                     <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
                       <p className="text-blue-900 text-sm">
@@ -1158,6 +1458,22 @@ export default function VisitorKioskPage() {
                   )}
                 </div>
               </Card>
+
+              {/* Submission Error */}
+              {errors.submission && (
+                <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg">
+                  <div className="flex items-center gap-2 text-red-700">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    <span className="text-sm flex-1">{errors.submission}</span>
+                    <button
+                      onClick={() => setErrors({ ...errors, submission: "" })}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between pt-4">
                 <Button onClick={handleBack} variant="outline" className="h-14 px-8 text-lg">

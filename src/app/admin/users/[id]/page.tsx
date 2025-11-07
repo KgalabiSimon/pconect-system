@@ -15,94 +15,137 @@ import {
   Building2
 } from "lucide-react";
 import Link from "next/link";
-import { use } from "react";
+import { use, useEffect, useState, useMemo } from "react";
+import { useUsers } from "@/hooks/api/useUsers";
+import { useCheckIns } from "@/hooks/api/useCheckIns";
+import { useBuildings } from "@/hooks/api/useBuildings";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import type { CheckInResponse } from "@/types/api";
 
 export default function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { loadUser, user, isLoading: userLoading, error: userError } = useUsers();
+  const { filterCheckIns, isLoading: checkInsLoading } = useCheckIns();
+  const { buildings } = useBuildings({ initialLoad: true });
+  const [checkIns, setCheckIns] = useState<CheckInResponse[]>([]);
 
-  // Sample user data
-  const user = {
-    id: id,
-    firstName: "John",
-    lastName: "Doe",
-    email: "john.doe@example.com",
-    phone: "+27 82 123 4567",
-    building: "Building 41",
-    programme: "Programme 1A",
-    laptop: "Dell Latitude 5420",
-    assetNumber: "DST-001",
-    createdAt: "2025-09-15",
-  };
+  // Load user data on mount
+  useEffect(() => {
+    if (id) {
+      loadUser(id);
+      // Load check-ins for this user
+      filterCheckIns({ user_id: id }).then(setCheckIns);
+    }
+  }, [id, loadUser, filterCheckIns]);
 
-  // Sample check-in history
-  const checkIns = [
-    {
-      id: "CHK-001",
-      date: "2025-10-15",
-      timeIn: "08:30 AM",
-      timeOut: "05:45 PM",
-      duration: "9h 15m",
-      floor: "Ground Floor",
-      block: "Block A",
-      building: "Building 41",
-    },
-    {
-      id: "CHK-002",
-      date: "2025-10-14",
-      timeIn: "09:00 AM",
-      timeOut: "06:15 PM",
-      duration: "9h 15m",
-      floor: "First Floor",
-      block: "Block D",
-      building: "Building 41",
-    },
-    {
-      id: "CHK-003",
-      date: "2025-10-13",
-      timeIn: "08:45 AM",
-      timeOut: "05:30 PM",
-      duration: "8h 45m",
-      floor: "Ground Floor",
-      block: "Block B",
-      building: "Building 41",
-    },
-  ];
+  // Build building map for lookups
+  const buildingMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    buildings.forEach(building => {
+      map[building.id] = building.name || building.building_code || building.id;
+    });
+    return map;
+  }, [buildings]);
 
-  // Monthly statistics
-  const monthlyStats = {
-    october: { checkIns: 15, hours: 132.5 },
-    september: { checkIns: 20, hours: 175.0 },
-    august: { checkIns: 18, hours: 157.5 },
-  };
+  // Calculate monthly statistics from check-ins
+  const monthlyStats = useMemo(() => {
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    // Get last 3 months
+    const months = [
+      { month: currentMonth, year: currentYear, name: today.toLocaleString('default', { month: 'long' }) },
+      { month: currentMonth - 1, year: currentMonth === 0 ? currentYear - 1 : currentYear, name: new Date(currentYear, currentMonth - 1).toLocaleString('default', { month: 'long' }) },
+      { month: currentMonth - 2, year: currentMonth <= 1 ? currentYear - 1 : currentYear, name: new Date(currentYear, currentMonth - 2).toLocaleString('default', { month: 'long' }) },
+    ];
+
+    const stats = months.map(({ month, year, name }) => {
+      const monthStart = new Date(year, month, 1);
+      const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
+
+      const monthCheckIns = checkIns.filter(ci => {
+        const checkInDate = new Date(ci.check_in_time);
+        return checkInDate >= monthStart && checkInDate <= monthEnd;
+      });
+
+      // Calculate total hours from durations
+      const totalHours = monthCheckIns.reduce((sum, ci) => {
+        if (ci.duration_minutes) {
+          return sum + (ci.duration_minutes / 60);
+        } else if (ci.check_out_time) {
+          // Calculate duration if duration_minutes is not available
+          const checkInTime = new Date(ci.check_in_time);
+          const checkOutTime = new Date(ci.check_out_time);
+          const diffMs = checkOutTime.getTime() - checkInTime.getTime();
+          return sum + (diffMs / (1000 * 60 * 60)); // Convert to hours
+        }
+        return sum;
+      }, 0);
+
+      return {
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        checkIns: monthCheckIns.length,
+        hours: Math.round(totalHours * 10) / 10,
+      };
+    });
+
+    return {
+      first: stats[0],
+      second: stats[1],
+      third: stats[2],
+    };
+  }, [checkIns]);
 
   const downloadReport = () => {
+    if (!user) return;
+
+    const userName = `${user.first_name} ${user.last_name}`;
+    const buildingName = user.building_id ? (buildingMap[user.building_id] || user.building_id) : 'N/A';
+    const programmeName = user.programme_id || 'N/A';
+
     const csv = [
-      ["Check-In Report for " + user.firstName + " " + user.lastName],
+      ["Check-In Report for " + userName],
       [""],
       ["User Information"],
       ["ID", user.id],
       ["Email", user.email],
-      ["Phone", user.phone],
-      ["Building", user.building],
-      ["Programme", user.programme],
+      ["Phone", user.phone || 'N/A'],
+      ["Building", buildingName],
+      ["Programme", programmeName],
       [""],
       ["Check-In History"],
-      ["Date", "Time In", "Time Out", "Duration", "Floor", "Block", "Building"],
-      ...checkIns.map((c) => [
-        c.date,
-        c.timeIn,
-        c.timeOut,
-        c.duration,
-        c.floor,
-        c.block,
-        c.building,
-      ]),
+      ["Date", "Time In", "Time Out", "Duration (hours)", "Floor", "Block", "Building"],
+      ...checkIns.map((c) => {
+        const checkInDate = new Date(c.check_in_time);
+        const dateStr = checkInDate.toISOString().split('T')[0];
+        const timeIn = checkInDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const timeOut = c.check_out_time 
+          ? new Date(c.check_out_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+          : 'N/A';
+        const duration = c.duration_minutes 
+          ? (c.duration_minutes / 60).toFixed(2)
+          : c.check_out_time
+          ? ((new Date(c.check_out_time).getTime() - checkInDate.getTime()) / (1000 * 60 * 60)).toFixed(2)
+          : 'N/A';
+        const buildingName = c.building_id ? (buildingMap[c.building_id] || c.building_id) : 'N/A';
+        
+        return [
+          dateStr,
+          timeIn,
+          timeOut,
+          duration,
+          c.floor || 'N/A',
+          c.block || 'N/A',
+          buildingName,
+        ];
+      }),
       [""],
       ["Monthly Summary"],
       ["Month", "Check-Ins", "Total Hours"],
-      ["October 2025", monthlyStats.october.checkIns, monthlyStats.october.hours],
-      ["September 2025", monthlyStats.september.checkIns, monthlyStats.september.hours],
-      ["August 2025", monthlyStats.august.checkIns, monthlyStats.august.hours],
+      [`${monthlyStats.first.name} ${new Date().getFullYear()}`, monthlyStats.first.checkIns, monthlyStats.first.hours],
+      [`${monthlyStats.second.name} ${new Date().getFullYear()}`, monthlyStats.second.checkIns, monthlyStats.second.hours],
+      [`${monthlyStats.third.name} ${new Date().getFullYear()}`, monthlyStats.third.checkIns, monthlyStats.third.hours],
     ]
       .map((row) => row.join(","))
       .join("\n");
@@ -111,11 +154,40 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${user.firstName}-${user.lastName}-checkin-report.csv`;
+    a.download = `${user.first_name}-${user.last_name}-checkin-report.csv`;
     a.click();
   };
 
+  if (userLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading user data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (userError || !user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{userError || 'User not found'}</p>
+          <Link href="/admin/users">
+            <Button>Back to Users</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const buildingName = user.building_id ? (buildingMap[user.building_id] || user.building_id) : 'N/A';
+  const programmeName = user.programme_id || 'N/A';
+  const createdAt = user.created_at ? new Date(user.created_at).toISOString().split('T')[0] : 'N/A';
+
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
@@ -128,9 +200,8 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
             </Link>
             <div>
               <h1 className="text-xl font-bold text-gray-900">
-                {user.firstName} {user.lastName}
+                {user.first_name} {user.last_name}
               </h1>
-              <p className="text-sm text-gray-600">{user.id}</p>
             </div>
           </div>
           <Button
@@ -159,35 +230,38 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
               <Phone className="w-5 h-5 text-gray-400" />
               <div>
                 <div className="text-sm text-gray-600">Phone</div>
-                <div className="font-medium">{user.phone}</div>
+                <div className="font-medium">{user.phone || 'N/A'}</div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Building2 className="w-5 h-5 text-gray-400" />
               <div>
                 <div className="text-sm text-gray-600">Building</div>
-                <div className="font-medium">{user.building}</div>
+                <div className="font-medium">{buildingName}</div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <TrendingUp className="w-5 h-5 text-gray-400" />
               <div>
                 <div className="text-sm text-gray-600">Programme</div>
-                <div className="font-medium">{user.programme}</div>
+                <div className="font-medium">{programmeName}</div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Laptop className="w-5 h-5 text-gray-400" />
               <div>
                 <div className="text-sm text-gray-600">Laptop</div>
-                <div className="font-medium">{user.laptop}</div>
+                <div className="font-medium">{user.laptop_model || 'N/A'}</div>
+                {user.laptop_asset_number && (
+                  <div className="text-xs text-gray-500 mt-1">Asset: {user.laptop_asset_number}</div>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Calendar className="w-5 h-5 text-gray-400" />
               <div>
                 <div className="text-sm text-gray-600">Member Since</div>
-                <div className="font-medium">{user.createdAt}</div>
+                <div className="font-medium">{createdAt}</div>
               </div>
             </div>
           </div>
@@ -196,71 +270,107 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
         {/* Monthly Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <Card className="p-6 bg-gradient-to-br from-blue-500 to-blue-600 text-white">
-            <div className="text-sm opacity-90 mb-1">October 2025</div>
-            <div className="text-3xl font-bold mb-1">{monthlyStats.october.checkIns}</div>
+            <div className="text-sm opacity-90 mb-1">{monthlyStats.first.name} {new Date().getFullYear()}</div>
+            <div className="text-3xl font-bold mb-1">{monthlyStats.first.checkIns}</div>
             <div className="text-sm opacity-90">Check-Ins</div>
-            <div className="text-xs mt-2">{monthlyStats.october.hours} hours</div>
+            <div className="text-xs mt-2">{monthlyStats.first.hours} hours</div>
           </Card>
           <Card className="p-6 bg-gradient-to-br from-green-500 to-green-600 text-white">
-            <div className="text-sm opacity-90 mb-1">September 2025</div>
-            <div className="text-3xl font-bold mb-1">{monthlyStats.september.checkIns}</div>
+            <div className="text-sm opacity-90 mb-1">{monthlyStats.second.name} {new Date().getFullYear()}</div>
+            <div className="text-3xl font-bold mb-1">{monthlyStats.second.checkIns}</div>
             <div className="text-sm opacity-90">Check-Ins</div>
-            <div className="text-xs mt-2">{monthlyStats.september.hours} hours</div>
+            <div className="text-xs mt-2">{monthlyStats.second.hours} hours</div>
           </Card>
           <Card className="p-6 bg-gradient-to-br from-purple-500 to-purple-600 text-white">
-            <div className="text-sm opacity-90 mb-1">August 2025</div>
-            <div className="text-3xl font-bold mb-1">{monthlyStats.august.checkIns}</div>
+            <div className="text-sm opacity-90 mb-1">{monthlyStats.third.name} {new Date().getFullYear()}</div>
+            <div className="text-3xl font-bold mb-1">{monthlyStats.third.checkIns}</div>
             <div className="text-sm opacity-90">Check-Ins</div>
-            <div className="text-xs mt-2">{monthlyStats.august.hours} hours</div>
+            <div className="text-xs mt-2">{monthlyStats.third.hours} hours</div>
           </Card>
         </div>
 
         {/* Check-In History */}
         <Card className="p-6">
           <h2 className="text-lg font-semibold mb-4">Check-In History</h2>
-          <div className="space-y-4">
-            {checkIns.map((checkIn) => (
-              <Card key={checkIn.id} className="p-4 border-l-4 border-l-blue-500">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Calendar className="w-4 h-4 text-gray-500" />
-                      <span className="font-semibold">{checkIn.date}</span>
-                      <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                        {checkIn.id}
-                      </span>
+          {checkInsLoading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading check-ins...</p>
+            </div>
+          ) : checkIns.length === 0 ? (
+            <div className="text-center py-8">
+              <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-600">No check-in history found</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {checkIns.map((checkIn) => {
+                const checkInDate = new Date(checkIn.check_in_time);
+                const dateStr = checkInDate.toISOString().split('T')[0];
+                const timeIn = checkInDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                const timeOut = checkIn.check_out_time 
+                  ? new Date(checkIn.check_out_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+                  : 'N/A';
+                const duration = checkIn.duration_minutes 
+                  ? `${Math.floor(checkIn.duration_minutes / 60)}h ${checkIn.duration_minutes % 60}m`
+                  : checkIn.check_out_time
+                  ? (() => {
+                      const diffMs = new Date(checkIn.check_out_time).getTime() - checkInDate.getTime();
+                      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                      return `${hours}h ${minutes}m`;
+                    })()
+                  : 'N/A';
+                const buildingName = checkIn.building_id ? (buildingMap[checkIn.building_id] || checkIn.building_id) : 'N/A';
+
+                return (
+                  <Card key={checkIn.id} className="p-4 border-l-4 border-l-blue-500">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Calendar className="w-4 h-4 text-gray-500" />
+                          <span className="font-semibold">{dateStr}</span>
+                          <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-700">
+                            Ref: {checkIn.id.substring(0, 8)}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div>
+                            <div className="text-gray-600 text-xs">Time In</div>
+                            <div className="font-medium text-green-700">{timeIn}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-600 text-xs">Time Out</div>
+                            <div className="font-medium text-orange-700">{timeOut}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-600 text-xs">Duration</div>
+                            <div className="font-medium text-blue-700">{duration}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-600 text-xs">Location</div>
+                            <div className="font-medium">{checkIn.floor || 'N/A'}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        <div className="flex items-center gap-1 mb-1">
+                          <MapPin className="w-4 h-4" />
+                          <span>{checkIn.block || 'N/A'}</span>
+                        </div>
+                        {buildingName !== 'N/A' && (
+                          <div className="text-xs text-gray-500">{buildingName}</div>
+                        )}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                      <div>
-                        <div className="text-gray-600 text-xs">Time In</div>
-                        <div className="font-medium text-green-700">{checkIn.timeIn}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-600 text-xs">Time Out</div>
-                        <div className="font-medium text-orange-700">{checkIn.timeOut}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-600 text-xs">Duration</div>
-                        <div className="font-medium text-blue-700">{checkIn.duration}</div>
-                      </div>
-                      <div>
-                        <div className="text-gray-600 text-xs">Location</div>
-                        <div className="font-medium">{checkIn.floor}</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    <div className="flex items-center gap-1">
-                      <MapPin className="w-4 h-4" />
-                      <span>{checkIn.block}</span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

@@ -4,108 +4,218 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ArrowLeft, Calendar, Clock, TrendingUp, MapPin, Building2, Activity } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/api/useAuth";
+import { useCheckIns } from "@/hooks/api/useCheckIns";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
 
 export default function CheckInHistoryPage() {
-  // Sample check-in history data
-  const [checkInHistory] = useState([
-    {
-      id: "CHK-001",
-      date: "2025-10-15",
-      timeIn: "08:30 AM",
-      timeOut: "05:45 PM",
-      duration: "9h 15m",
-      floor: "Ground Floor",
-      block: "Block A",
-      building: "Building 41",
-      laptop: "Yes - Dell Latitude 5420",
-    },
-    {
-      id: "CHK-002",
-      date: "2025-10-14",
-      timeIn: "09:00 AM",
-      timeOut: "06:15 PM",
-      duration: "9h 15m",
-      floor: "First Floor",
-      block: "Block D",
-      building: "Building 41",
-      laptop: "Yes - Dell Latitude 5420",
-    },
-    {
-      id: "CHK-003",
-      date: "2025-10-13",
-      timeIn: "08:45 AM",
-      timeOut: "05:30 PM",
-      duration: "8h 45m",
-      floor: "Ground Floor",
-      block: "Block B",
-      building: "DSTI",
-      laptop: "Yes - Dell Latitude 5420",
-    },
-    {
-      id: "CHK-004",
-      date: "2025-10-12",
-      timeIn: "08:15 AM",
-      timeOut: "04:00 PM",
-      duration: "7h 45m",
-      floor: "Second Floor",
-      block: "Block H",
-      building: "Building 42",
-      laptop: "Yes - Dell Latitude 5420",
-    },
-    {
-      id: "CHK-005",
-      date: "2025-10-11",
-      timeIn: "09:30 AM",
-      timeOut: "06:00 PM",
-      duration: "8h 30m",
-      floor: "Ground Floor",
-      block: "Block A",
-      building: "Building 41",
-      laptop: "Yes - Dell Latitude 5420",
-    },
-    {
-      id: "CHK-006",
-      date: "2025-10-10",
-      timeIn: "08:00 AM",
-      timeOut: "05:00 PM",
-      duration: "9h 00m",
-      floor: "First Floor",
-      block: "Block C",
-      building: "DSTI",
-      laptop: "Yes - Dell Latitude 5420",
-    },
-  ]);
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { getUserCheckInHistory, isLoading, error } = useCheckIns();
+  const { error: showError, ToastContainer } = useToast();
+  
+  const [checkInHistory, setCheckInHistory] = useState<any[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  // Analytics data
-  const analytics = {
-    totalCheckIns: 24,
-    thisMonth: 18,
-    lastMonth: 16,
-    averageDuration: "8h 45m",
-    mostUsedFloor: "Ground Floor",
-    mostUsedBlock: "Block A",
-    mostUsedBuilding: "Building 41 (50%)",
-    totalHoursWorked: 198.5,
-    averageCheckInTime: "08:42 AM",
-    averageCheckOutTime: "05:38 PM",
+  // Fetch check-in history from API
+  useEffect(() => {
+    const fetchHistory = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const history = await getUserCheckInHistory(user.id);
+        setHistoryError(null);
+        
+        // Transform API response to match UI format
+        const transformedHistory = history.map((checkIn) => {
+          const checkInTime = new Date(checkIn.check_in_time);
+          const checkOutTime = checkIn.check_out_time ? new Date(checkIn.check_out_time) : null;
+          
+          // Calculate duration
+          let duration = "N/A";
+          if (checkOutTime) {
+            const diffMs = checkOutTime.getTime() - checkInTime.getTime();
+            const hours = Math.floor(diffMs / (1000 * 60 * 60));
+            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            duration = `${hours}h ${minutes}m`;
+          }
+          
+          return {
+            id: checkIn.id,
+            date: checkInTime.toISOString().split('T')[0],
+            timeIn: checkInTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            timeOut: checkOutTime 
+              ? checkOutTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+              : null,
+            duration: duration,
+            floor: checkIn.floor || "N/A",
+            block: checkIn.block || "N/A",
+            building: checkIn.building_id || "N/A",
+            laptop: checkIn.laptop_model || "None",
+            status: checkIn.status,
+          };
+        });
+        
+        // Sort by date (newest first)
+        transformedHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        setCheckInHistory(transformedHistory);
+      } catch (err: any) {
+        const message = err?.message || 'Failed to fetch check-in history. Please try again.';
+        setHistoryError(message);
+        showError(message);
+      }
+    };
+
+    if (isAuthenticated && user) {
+      fetchHistory();
+    }
+  }, [user, isAuthenticated, getUserCheckInHistory]);
+
+  // Calculate analytics from real data
+  const calculateAnalytics = () => {
+    if (checkInHistory.length === 0) {
+      return {
+        totalCheckIns: 0,
+        thisMonth: 0,
+        lastMonth: 0,
+        averageDuration: "0h 0m",
+        mostUsedFloor: "N/A",
+        mostUsedBlock: "N/A",
+        mostUsedBuilding: "N/A",
+        totalHoursWorked: 0,
+        averageCheckInTime: "N/A",
+        averageCheckOutTime: "N/A",
+      };
+    }
+
+    const now = new Date();
+    const thisMonth = checkInHistory.filter(c => {
+      const checkInDate = new Date(c.date);
+      return checkInDate.getMonth() === now.getMonth() && 
+             checkInDate.getFullYear() === now.getFullYear();
+    }).length;
+
+    const lastMonth = checkInHistory.filter(c => {
+      const checkInDate = new Date(c.date);
+      const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return checkInDate >= lastMonthDate && checkInDate < new Date(now.getFullYear(), now.getMonth(), 1);
+    }).length;
+
+    // Calculate durations
+    const durations = checkInHistory
+      .filter(c => c.duration !== "N/A")
+      .map(c => {
+        const [hours, minutes] = c.duration.split('h ').map((v: string) => parseInt(v.replace('m', '')));
+        return hours + (minutes / 60);
+      });
+
+    const totalHours = durations.reduce((sum, h) => sum + h, 0);
+    const avgHours = durations.length > 0 ? totalHours / durations.length : 0;
+    const avgHoursInt = Math.floor(avgHours);
+    const avgMins = Math.floor((avgHours - avgHoursInt) * 60);
+
+    // Calculate most used locations
+    const floorCounts: Record<string, number> = {};
+    const blockCounts: Record<string, number> = {};
+    checkInHistory.forEach(c => {
+      floorCounts[c.floor] = (floorCounts[c.floor] || 0) + 1;
+      blockCounts[c.block] = (blockCounts[c.block] || 0) + 1;
+    });
+
+    const mostUsedFloor = Object.entries(floorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+    const mostUsedBlock = Object.entries(blockCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+
+    // Calculate average check-in/out times
+    const checkInTimes = checkInHistory
+      .map(c => {
+        const [time, period] = c.timeIn.split(' ');
+        const [hours, minutes] = time.split(':');
+        let hour24 = parseInt(hours);
+        if (period === 'PM' && hour24 !== 12) hour24 += 12;
+        if (period === 'AM' && hour24 === 12) hour24 = 0;
+        return hour24 * 60 + parseInt(minutes);
+      })
+      .filter(t => !isNaN(t));
+
+    const avgCheckInMinutes = checkInTimes.length > 0 
+      ? checkInTimes.reduce((sum, t) => sum + t, 0) / checkInTimes.length 
+      : 0;
+    const avgCheckInHour = Math.floor(avgCheckInMinutes / 60);
+    const avgCheckInMin = Math.floor(avgCheckInMinutes % 60);
+    const avgCheckInTime = checkInTimes.length > 0
+      ? `${avgCheckInHour.toString().padStart(2, '0')}:${avgCheckInMin.toString().padStart(2, '0')} ${avgCheckInHour >= 12 ? 'PM' : 'AM'}`
+      : "N/A";
+
+    return {
+      totalCheckIns: checkInHistory.length,
+      thisMonth,
+      lastMonth,
+      averageDuration: `${avgHoursInt}h ${avgMins}m`,
+      mostUsedFloor,
+      mostUsedBlock,
+      mostUsedBuilding: "N/A", // Would need building names
+      totalHoursWorked: Math.round(totalHours * 10) / 10,
+      averageCheckInTime: avgCheckInTime,
+      averageCheckOutTime: "N/A", // Can calculate similarly if needed
+    };
   };
 
-  // Floor usage breakdown
-  const floorUsage = [
-    { floor: "Ground Floor", count: 12, percentage: 50 },
-    { floor: "First Floor", count: 7, percentage: 29 },
-    { floor: "Second Floor", count: 5, percentage: 21 },
-  ];
+  const analytics = calculateAnalytics();
 
-  // Building usage breakdown
-  const buildingUsage = [
-    { building: "Building 41", count: 12, percentage: 50 },
-    { building: "Building 42", count: 8, percentage: 33 },
-    { building: "DSTI (Dept. of Science, Technology & Innovation)", count: 4, percentage: 17 },
-  ];
+  // Calculate floor usage breakdown from real data
+  const calculateFloorUsage = () => {
+    const floorCounts: Record<string, number> = {};
+    checkInHistory.forEach(c => {
+      floorCounts[c.floor] = (floorCounts[c.floor] || 0) + 1;
+    });
+
+    const total = checkInHistory.length || 1;
+    return Object.entries(floorCounts)
+      .map(([floor, count]) => ({
+        floor,
+        count,
+        percentage: Math.round((count / total) * 100),
+      }))
+      .sort((a, b) => b.count - a.count);
+  };
+
+  const floorUsage = calculateFloorUsage();
+
+  // Building usage is not available in API response yet
+  // Would need building names from buildings API
+  const buildingUsage: Array<{ building: string; count: number; percentage: number }> = [];
+
+  // Loading state
+  if (authLoading || isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading check-in history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600 mb-4">Please log in to view your check-in history</p>
+          <Link href="/login">
+            <Button>Go to Login</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
+    <ProtectedRoute>
+    <ToastContainer />
     <div className="min-h-screen bg-background">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3.5 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
@@ -262,6 +372,20 @@ export default function CheckInHistoryPage() {
 
         {/* Check-In History */}
         <h2 className="text-xl font-bold mb-4">Check-In History</h2>
+        
+        {(error || historyError) && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded">
+            <p className="text-red-700 text-sm">{historyError || error}</p>
+          </div>
+        )}
+
+        {checkInHistory.length === 0 ? (
+          <Card className="p-8 text-center">
+            <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <p className="text-gray-600 mb-2">No check-in history found</p>
+            <p className="text-sm text-gray-500">Your check-in history will appear here once you start checking in.</p>
+          </Card>
+        ) : (
         <div className="space-y-3">
           {checkInHistory.map((record) => (
             <Card key={record.id} className="p-4">
@@ -275,8 +399,16 @@ export default function CheckInHistoryPage() {
                     {record.building} • {record.floor} • {record.block}
                   </div>
                 </div>
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                  Completed
+                <span className={`text-xs px-2 py-1 rounded ${
+                  record.status === 'checked_out' 
+                    ? 'bg-green-100 text-green-700'
+                    : record.status === 'checked_in'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-gray-100 text-gray-700'
+                }`}>
+                  {record.status === 'checked_out' ? 'Completed' : 
+                   record.status === 'checked_in' ? 'Active' : 
+                   'Pending'}
                 </span>
               </div>
 
@@ -295,7 +427,7 @@ export default function CheckInHistoryPage() {
                 </div>
               </div>
 
-              {record.laptop && (
+              {record.laptop && record.laptop !== "None" && (
                 <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
                   <strong>Laptop:</strong> {record.laptop}
                 </div>
@@ -303,6 +435,7 @@ export default function CheckInHistoryPage() {
             </Card>
           ))}
         </div>
+        )}
 
         {/* Back Button */}
         <Link href="/checkin" className="block mt-6">
@@ -312,5 +445,6 @@ export default function CheckInHistoryPage() {
         </Link>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

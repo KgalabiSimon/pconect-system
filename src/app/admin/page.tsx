@@ -19,47 +19,163 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/api/useAuth";
+import { useUsers } from "@/hooks/api/useUsers";
+import { useCheckIns } from "@/hooks/api/useCheckIns";
+import { useBookings } from "@/hooks/api/useBookings";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function AdminDashboardPage() {
   const router = useRouter();
+  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
+  const { getUserCount } = useUsers();
+  const { filterCheckIns } = useCheckIns();
+  const { getAdminBookings } = useBookings();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [stats, setStats] = useState({
-    totalUsers: 156,
-    activeToday: 89,
-    totalCheckIns: 1247,
-    totalBookings: 342,
-    bookingsToday: 12,
-    bookingsThisWeek: 67,
-    averageCheckInTime: "8:42 AM",
-    averageCheckOutTime: "5:38 PM",
-    mostUsedFloor: "Ground Floor",
-    mostUsedProgramme: "Programme 1A",
+    totalUsers: 0,
+    activeToday: 0,
+    totalCheckIns: 0,
+    totalBookings: 0,
+    bookingsToday: 0,
+    bookingsThisWeek: 0,
+    averageCheckInTime: "N/A",
+    averageCheckOutTime: "N/A",
+    mostUsedFloor: "N/A",
+    mostUsedProgramme: "N/A",
   });
 
   useEffect(() => {
-    // Check if admin is logged in
-    console.log("🔍 Dashboard: Checking admin authentication...");
-
-    try {
-      const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
-      console.log("🔐 Dashboard: Admin status =", isAdminLoggedIn);
-
-      if (!isAdminLoggedIn) {
-        console.log("❌ Dashboard: No session, redirecting to login");
-        router.push("/admin/login");
-      } else {
-        console.log("✅ Dashboard: Admin authenticated");
-      }
-    } catch (error) {
-      console.error("❌ Dashboard: Auth check error:", error);
+    // Check if user is authenticated
+    if (!authLoading && !isAuthenticated) {
       router.push("/admin/login");
+    } else if (isAuthenticated) {
+      loadDashboardStats();
     }
-  }, [router]);
+  }, [isAuthenticated, authLoading, router]);
+
+  const loadDashboardStats = async () => {
+    try {
+      setIsLoadingStats(true);
+      
+      // Get today's date range
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+      
+      // Get week start date
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+      
+      // Fetch all stats in parallel
+      const [userCountResult, checkInsToday, allCheckIns, allBookings, bookingsToday, bookingsThisWeek] = await Promise.all([
+        // Total users count
+        getUserCount().catch(() => null),
+        
+        // Active check-ins today (status = checked_in, created today)
+        filterCheckIns({
+          status: 'checked_in',
+          start_date: today.toISOString(),
+          end_date: todayEnd.toISOString(),
+        }).catch(() => []),
+        
+        // All check-ins (for total count)
+        filterCheckIns({}).catch(() => []),
+        
+        // All bookings (for total count)
+        getAdminBookings({}).catch(() => []),
+        
+        // Today's bookings
+        getAdminBookings({
+          booking_date: today.toISOString().split('T')[0],
+        }).catch(() => []),
+        
+        // This week's bookings
+        getAdminBookings({
+          booking_date: weekStart.toISOString().split('T')[0],
+        }).catch(() => []),
+      ]);
+
+      // Calculate active check-ins today (checked_in status)
+      const activeCheckInsToday = checkInsToday.filter(
+        ci => ci.status === 'checked_in'
+      ).length;
+
+      // Calculate average check-in/out times from today's check-ins
+      let totalCheckInHours = 0;
+      let totalCheckInMinutes = 0;
+      let totalCheckOutHours = 0;
+      let totalCheckOutMinutes = 0;
+      let checkInCount = 0;
+      let checkOutCount = 0;
+
+      checkInsToday.forEach(checkIn => {
+        if (checkIn.check_in_time) {
+          const checkInTime = new Date(checkIn.check_in_time);
+          totalCheckInHours += checkInTime.getHours();
+          totalCheckInMinutes += checkInTime.getMinutes();
+          checkInCount++;
+        }
+        if (checkIn.check_out_time) {
+          const checkOutTime = new Date(checkIn.check_out_time);
+          totalCheckOutHours += checkOutTime.getHours();
+          totalCheckOutMinutes += checkOutTime.getMinutes();
+          checkOutCount++;
+        }
+      });
+
+      // Format average times
+      const avgCheckInTime = checkInCount > 0
+        ? `${Math.floor(totalCheckInHours / checkInCount)}:${String(Math.floor(totalCheckInMinutes / checkInCount)).padStart(2, '0')}`
+        : "N/A";
+      const avgCheckOutTime = checkOutCount > 0
+        ? `${Math.floor(totalCheckOutHours / checkOutCount)}:${String(Math.floor(totalCheckOutMinutes / checkOutCount)).padStart(2, '0')}`
+        : "N/A";
+
+      // Calculate most used floor (from today's check-ins)
+      const floorCounts: Record<string, number> = {};
+      checkInsToday.forEach(ci => {
+        if (ci.floor) {
+          floorCounts[ci.floor] = (floorCounts[ci.floor] || 0) + 1;
+        }
+      });
+      const mostUsedFloor = Object.keys(floorCounts).length > 0
+        ? Object.entries(floorCounts).sort(([,a], [,b]) => b - a)[0][0]
+        : "N/A";
+
+      // Calculate most used programme (would need to fetch user data, using placeholder)
+      const mostUsedProgramme = "N/A"; // TODO: Calculate from user data
+
+      // Count bookings this week (filter by date range)
+      const thisWeekBookings = bookingsThisWeek.filter(booking => {
+        const bookingDate = new Date(booking.booking_date);
+        return bookingDate >= weekStart && bookingDate <= todayEnd;
+      });
+
+      setStats({
+        totalUsers: userCountResult || 0,
+        activeToday: activeCheckInsToday,
+        totalCheckIns: allCheckIns.length,
+        totalBookings: allBookings.length,
+        bookingsToday: bookingsToday.length,
+        bookingsThisWeek: thisWeekBookings.length,
+        averageCheckInTime: avgCheckInTime !== "N/A" ? `${avgCheckInTime} AM` : "N/A",
+        averageCheckOutTime: avgCheckOutTime !== "N/A" ? `${avgCheckOutTime} PM` : "N/A",
+        mostUsedFloor,
+        mostUsedProgramme,
+      });
+    } catch (err: any) {
+      // Error loading dashboard stats - stats will show defaults
+      // Error could be displayed via error state if needed
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
 
   const handleLogout = () => {
-    sessionStorage.removeItem("adminLoggedIn");
-    sessionStorage.removeItem("adminEmail");
-    sessionStorage.removeItem("adminName");
+    logout();
     router.push("/admin/login");
   };
 
@@ -73,8 +189,26 @@ export default function AdminDashboardPage() {
     { name: "Reports", href: "/admin/reports", icon: Download },
   ];
 
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading admin dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render if not authenticated (redirect is handled in useEffect)
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="px-4 py-3">
@@ -86,6 +220,7 @@ export default function AdminDashboardPage() {
                   src="https://ext.same-assets.com/2434544859/849502017.png"
                   alt="P-Connect"
                   fill
+                  sizes="128px"
                   className="object-contain object-left"
                 />
               </div>
@@ -105,6 +240,7 @@ export default function AdminDashboardPage() {
                     src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTG_O60OjGZ-JvEMg_5BRHor1H_aSpq_oNxXA&s"
                     alt="DSTI"
                     fill
+                    sizes="80px"
                     className="object-contain"
                   />
                 </div>
@@ -163,6 +299,7 @@ export default function AdminDashboardPage() {
                   src="https://ext.same-assets.com/2434544859/849502017.png"
                   alt="P-Connect"
                   fill
+                  sizes="128px"
                   className="object-contain object-left"
                 />
               </div>
@@ -201,46 +338,55 @@ export default function AdminDashboardPage() {
           {/* Page Title */}
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-gray-900">Dashboard Overview</h2>
-            <p className="text-gray-600 mt-1">Welcome to the P-Connect admin portal</p>
+            <p className="text-gray-600 mt-1">Welcome to the P-Connect admin portal, {user?.first_name || 'Admin'}!</p>
           </div>
 
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <Card className="p-6 bg-gradient-to-br from-blue-500 to-blue-600 text-white">
-              <div className="flex items-center justify-between mb-2">
-                <Users className="w-8 h-8 opacity-80" />
-                <span className="text-xs bg-white/20 px-2 py-1 rounded">Total</span>
+            {isLoadingStats ? (
+              <div className="col-span-4 text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                <p className="text-gray-600">Loading statistics...</p>
               </div>
-              <div className="text-3xl font-bold mb-1">{stats.totalUsers}</div>
-              <div className="text-sm opacity-90">Registered Users</div>
-            </Card>
+            ) : (
+              <>
+                <Card className="p-6 bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <Users className="w-8 h-8 opacity-80" />
+                    <span className="text-xs bg-white/20 px-2 py-1 rounded">Total</span>
+                  </div>
+                  <div className="text-3xl font-bold mb-1">{stats.totalUsers}</div>
+                  <div className="text-sm opacity-90">Registered Users</div>
+                </Card>
 
-            <Card className="p-6 bg-gradient-to-br from-green-500 to-green-600 text-white">
-              <div className="flex items-center justify-between mb-2">
-                <UserCheck className="w-8 h-8 opacity-80" />
-                <span className="text-xs bg-white/20 px-2 py-1 rounded">Today</span>
-              </div>
-              <div className="text-3xl font-bold mb-1">{stats.activeToday}</div>
-              <div className="text-sm opacity-90">Active Check-Ins</div>
-            </Card>
+                <Card className="p-6 bg-gradient-to-br from-green-500 to-green-600 text-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <UserCheck className="w-8 h-8 opacity-80" />
+                    <span className="text-xs bg-white/20 px-2 py-1 rounded">Today</span>
+                  </div>
+                  <div className="text-3xl font-bold mb-1">{stats.activeToday}</div>
+                  <div className="text-sm opacity-90">Active Check-Ins</div>
+                </Card>
 
-            <Card className="p-6 bg-gradient-to-br from-purple-500 to-purple-600 text-white">
-              <div className="flex items-center justify-between mb-2">
-                <Clock className="w-8 h-8 opacity-80" />
-                <span className="text-xs bg-white/20 px-2 py-1 rounded">All Time</span>
-              </div>
-              <div className="text-3xl font-bold mb-1">{stats.totalCheckIns}</div>
-              <div className="text-sm opacity-90">Total Check-Ins</div>
-            </Card>
+                <Card className="p-6 bg-gradient-to-br from-purple-500 to-purple-600 text-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <Clock className="w-8 h-8 opacity-80" />
+                    <span className="text-xs bg-white/20 px-2 py-1 rounded">All Time</span>
+                  </div>
+                  <div className="text-3xl font-bold mb-1">{stats.totalCheckIns}</div>
+                  <div className="text-sm opacity-90">Total Check-Ins</div>
+                </Card>
 
-            <Card className="p-6 bg-gradient-to-br from-orange-500 to-orange-600 text-white">
-              <div className="flex items-center justify-between mb-2">
-                <Calendar className="w-8 h-8 opacity-80" />
-                <span className="text-xs bg-white/20 px-2 py-1 rounded">Total</span>
-              </div>
-              <div className="text-3xl font-bold mb-1">{stats.totalBookings}</div>
-              <div className="text-sm opacity-90">Total Bookings</div>
-            </Card>
+                <Card className="p-6 bg-gradient-to-br from-orange-500 to-orange-600 text-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <Calendar className="w-8 h-8 opacity-80" />
+                    <span className="text-xs bg-white/20 px-2 py-1 rounded">Total</span>
+                  </div>
+                  <div className="text-3xl font-bold mb-1">{stats.totalBookings}</div>
+                  <div className="text-sm opacity-90">Total Bookings</div>
+                </Card>
+              </>
+            )}
           </div>
 
           {/* Quick Stats */}
@@ -334,6 +480,7 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
       </main>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }

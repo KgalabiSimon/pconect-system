@@ -6,25 +6,53 @@ import { CheckCircle2, Calendar, MapPin, Clock, Home } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useMemo } from "react";
+import { useBuildings } from "@/hooks/api/useBuildings";
 
 function BookingSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { buildings, loadBuildings } = useBuildings({ initialLoad: true });
   const [timeDisplay, setTimeDisplay] = useState("");
   const [isToday, setIsToday] = useState(false);
 
   // Get booking details from URL params
-  const building = searchParams.get("building") || "41";
+  const buildingId = searchParams.get("building") || "";
   const type = searchParams.get("type") || "desk";
-  const spaceId = searchParams.get("spaceId") || "desk-101";
+  const spaceId = searchParams.get("spaceId") || "";
   const date = searchParams.get("date") || new Date().toISOString().split("T")[0];
-  const bookingId = searchParams.get("bookingId") || `BK-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+  const bookingId = searchParams.get("bookingId") || undefined;
   const startTime = searchParams.get("startTime");
   const endTime = searchParams.get("endTime");
 
+  // Ensure buildings are loaded
+  useEffect(() => {
+    if (buildings.length === 0) {
+      loadBuildings();
+    }
+  }, [buildings.length, loadBuildings]);
+
+  // Get building name by ID
+  const buildingName = useMemo(() => {
+    if (!buildingId) return "Unknown Building";
+    
+    const building = buildings.find(b => b.id === buildingId);
+    
+    // Try name first, then building_code, then fallback to ID
+    if (building) {
+      return building.name || building.building_code || `Building ${building.id}`;
+    }
+    
+    // If building not found yet, return a placeholder
+    // This can happen if buildings are still loading
+    return "Loading...";
+  }, [buildingId, buildings]);
+
   // Generate QR code data - include date for validation
-  const qrCodeUrl = `https://p-connect.web.app/booking/${bookingId}?date=${date}`;
+  // Only generate QR code if bookingId is available
+  const qrCodeUrl = bookingId 
+    ? `https://p-connect.web.app/booking/${bookingId}?date=${date}`
+    : "";
 
   const typeName = type === "desk" ? "Desk" : type === "office" ? "Office" : "Meeting Room";
 
@@ -77,8 +105,10 @@ function BookingSuccessContent() {
               <MapPin className="w-5 h-5 text-primary mt-0.5" />
               <div className="flex-1">
                 <div className="text-sm text-gray-600">Location</div>
-                <div className="font-semibold">Building {building}</div>
-                <div className="text-sm text-gray-700">{spaceId}</div>
+                <div className="font-semibold">{buildingName}</div>
+                {spaceId && (
+                  <div className="text-sm text-gray-700">{spaceId}</div>
+                )}
               </div>
             </div>
 
@@ -101,53 +131,45 @@ function BookingSuccessContent() {
                 </div>
               </div>
             </div>
-
-            <div className="flex items-start gap-3">
-              <div className="w-5 h-5 flex items-center justify-center mt-0.5">
-                <div className="w-2 h-2 rounded-full bg-primary" />
-              </div>
-              <div className="flex-1">
-                <div className="text-sm text-gray-600">Booking ID</div>
-                <div className="font-semibold font-mono text-sm">{bookingId}</div>
-              </div>
-            </div>
           </div>
         </Card>
 
-        {/* QR Code Card */}
-        <Card className="p-6 w-full mb-6">
-          <h3 className="font-semibold text-center mb-4">Your Access Pass QR Code</h3>
-          <div className="flex justify-center mb-4">
-            <div className="bg-white p-4 rounded-lg shadow-sm border-2 border-green-500">
-              <QRCodeSVG
-                value={qrCodeUrl}
-                size={200}
-                level="H"
-                includeMargin={true}
-              />
+        {/* QR Code Card - Only show if bookingId is available */}
+        {bookingId && qrCodeUrl && (
+          <Card className="p-6 w-full mb-6">
+            <h3 className="font-semibold text-center mb-4">Your Access Pass QR Code</h3>
+            <div className="flex justify-center mb-4">
+              <div className="bg-white p-4 rounded-lg shadow-sm border-2 border-green-500">
+                <QRCodeSVG
+                  value={qrCodeUrl}
+                  size={200}
+                  level="H"
+                  includeMargin={true}
+                />
+              </div>
             </div>
-          </div>
-          <p className="text-sm text-gray-600 text-center mb-4">
-            Use for Check-In & Check-Out on {date}
-          </p>
+            <p className="text-sm text-gray-600 text-center mb-4">
+              Use for Check-In & Check-Out on {date}
+            </p>
 
-          {/* Validity Info */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium text-gray-700">Valid Until:</span>
-              <span className="font-bold text-primary">12:00 AM (Midnight)</span>
-            </div>
-            {isToday && timeDisplay && (
+            {/* Validity Info */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-gray-700">Time Remaining:</span>
-                <span className="font-bold text-green-600">{timeDisplay}</span>
+                <span className="font-medium text-gray-700">Valid Until:</span>
+                <span className="font-bold text-primary">12:00 AM (Midnight)</span>
               </div>
-            )}
-            <div className="text-xs text-gray-600 pt-2 border-t">
-              ✓ Can be scanned multiple times until midnight
+              {isToday && timeDisplay && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-gray-700">Time Remaining:</span>
+                  <span className="font-bold text-green-600">{timeDisplay}</span>
+                </div>
+              )}
+              <div className="text-xs text-gray-600 pt-2 border-t">
+                ✓ Can be scanned multiple times until midnight
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        )}
 
         {/* Info Card */}
         <Card className="p-4 bg-blue-50 border-blue-200 mb-6 w-full">
