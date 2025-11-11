@@ -6,24 +6,44 @@ import { Card } from "@/components/ui/card";
 import { Shield, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/api/useAuth";
 
 export default function SecurityLoginPage() {
   const router = useRouter();
+  const { loginSecurity, isLoading, error, clearError } = useAuth();
   const [badge, setBadge] = useState("");
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSubmitting) return;
+
     // Simple validation
     if (!badge.trim() || !pin.trim()) {
       alert("Please enter badge number and PIN");
       return;
     }
-    // In real app, validate against security database
-    sessionStorage.setItem("securityLoggedIn", "true");
-    sessionStorage.setItem("securityBadge", badge);
+
+    setIsSubmitting(true);
+    clearError();
+
+    try {
+      const success = await loginSecurity(badge, pin);
+      
+      if (success) {
     router.push("/security");
+      } else {
+        alert(error || "Login failed. Please check your badge number and PIN.");
+      }
+    } catch (err: any) {
+      console.error("Security login error:", err);
+      alert(error || "Login failed. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -72,11 +92,18 @@ export default function SecurityLoginPage() {
             </div>
           </div>
 
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-500 text-sm p-3 rounded-lg">
+              {error}
+            </div>
+          )}
+
           <Button
             type="submit"
-            className="w-full h-14 text-lg bg-blue-600 hover:bg-blue-700 font-semibold"
+            disabled={isSubmitting || isLoading}
+            className="w-full h-14 text-lg bg-blue-600 hover:bg-blue-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Login to Checkpoint
+            {isSubmitting || isLoading ? "Logging in..." : "Login to Checkpoint"}
           </Button>
         </form>
 

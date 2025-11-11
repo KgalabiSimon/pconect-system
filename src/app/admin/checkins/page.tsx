@@ -17,16 +17,24 @@ import {
   Calendar,
   Clock,
   MapPin,
-  Filter
+  Filter,
+  UserCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/api/useAuth";
+import { useCheckIns } from "@/hooks/api/useCheckIns";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { CheckInResponse } from "@/types/api";
+import { userService } from "@/lib/api/users";
+import { buildingsService } from "@/lib/api/buildings";
 
-interface CheckIn {
+interface DisplayCheckIn {
   id: string;
   userId: string;
   userName: string;
+  userEmail: string;
   userType: "employee" | "visitor";
   programme?: string;
   building: string;
@@ -34,169 +42,205 @@ interface CheckIn {
   block: string;
   date: string;
   timeIn: string;
-  timeOut: string;
+  timeOut: string | null;
   duration: string;
   laptop: string;
-  // Visitor-specific fields
-  hostName?: string;
-  hostEmail?: string;
-  company?: string;
-  purpose?: string;
+  status: "checked_in" | "checked_out" | "pending";
 }
 
 export default function CheckInHistoryPage() {
   const router = useRouter();
-  const [checkIns, setCheckIns] = useState<CheckIn[]>([
-    {
-      id: "CHK-001",
-      userId: "USR-001",
-      userName: "John Doe",
-      userType: "employee",
-      programme: "Programme 1A",
-      building: "Building 41",
-      floor: "Ground Floor",
-      block: "Block A",
-      date: "2025-10-15",
-      timeIn: "08:30 AM",
-      timeOut: "05:45 PM",
-      duration: "9h 15m",
-      laptop: "Dell Latitude 5420"
-    },
-    {
-      id: "CHK-002",
-      userId: "USR-002",
-      userName: "Sarah Williams",
-      userType: "employee",
-      programme: "Programme 2",
-      building: "Building 42",
-      floor: "First Floor",
-      block: "Block D",
-      date: "2025-10-14",
-      timeIn: "09:00 AM",
-      timeOut: "06:15 PM",
-      duration: "9h 15m",
-      laptop: "HP EliteBook 840"
-    },
-    {
-      id: "CHK-003",
-      userId: "VIS-001",
-      userName: "Michael Chen",
-      userType: "visitor",
-      building: "Building 41",
-      floor: "Ground Floor",
-      block: "Block C",
-      date: "2025-10-15",
-      timeIn: "10:00 AM",
-      timeOut: "02:30 PM",
-      duration: "4h 30m",
-      laptop: "No laptop",
-      hostName: "John Doe",
-      hostEmail: "john.doe@example.com",
-      company: "Tech Solutions Inc",
-      purpose: "Business Meeting"
-    },
-    {
-      id: "CHK-004",
-      userId: "USR-003",
-      userName: "Mike Johnson",
-      userType: "employee",
-      programme: "Programme 1B",
-      building: "DSTI",
-      floor: "Ground Floor",
-      block: "Block B",
-      date: "2025-10-13",
-      timeIn: "08:45 AM",
-      timeOut: "05:30 PM",
-      duration: "8h 45m",
-      laptop: "Lenovo ThinkPad X1"
-    },
-    {
-      id: "CHK-005",
-      userId: "VIS-002",
-      userName: "Lisa Anderson",
-      userType: "visitor",
-      building: "Building 42",
-      floor: "First Floor",
-      block: "Block E",
-      date: "2025-10-14",
-      timeIn: "09:30 AM",
-      timeOut: "11:45 AM",
-      duration: "2h 15m",
-      laptop: "No laptop",
-      hostName: "Sarah Williams",
-      hostEmail: "sarah.w@example.com",
-      company: "Consulting Partners",
-      purpose: "Project Review"
-    },
-    {
-      id: "CHK-006",
-      userId: "VIS-003",
-      userName: "David Martinez",
-      userType: "visitor",
-      building: "DSTI",
-      floor: "Ground Floor",
-      block: "Block A",
-      date: "2025-10-15",
-      timeIn: "02:00 PM",
-      timeOut: "04:30 PM",
-      duration: "2h 30m",
-      laptop: "No laptop",
-      hostName: "Mike Johnson",
-      hostEmail: "mike.j@example.com",
-      company: "Innovation Labs",
-      purpose: "Technical Consultation"
-    },
-  ]);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { filterCheckIns, isLoading, error } = useCheckIns();
+  
+  const [viewMode, setViewMode] = useState<"active" | "all">("active");
+  const [checkIns, setCheckIns] = useState<DisplayCheckIn[]>([]);
+  const [rawCheckIns, setRawCheckIns] = useState<CheckInResponse[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterFloor, setFilterFloor] = useState("");
   const [filterBlock, setFilterBlock] = useState("");
-  const [filterProgramme, setFilterProgramme] = useState("");
   const [filterBuilding, setFilterBuilding] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filterUserType, setFilterUserType] = useState("all");
+  
+  // Options for dropdowns
+  const [buildings, setBuildings] = useState<{ id: string; name: string }[]>([]);
 
+  // Fetch buildings on mount
   useEffect(() => {
-    const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
-    if (!isAdminLoggedIn) {
-      router.push("/admin/login");
+    const fetchBuildings = async () => {
+      if (!isAuthenticated) return;
+      
+      try {
+        const buildingsData = await buildingsService.getBuildings();
+        setBuildings(buildingsData.map(b => ({ id: b.id, name: b.name })));
+      } catch (err: any) {
+        // Building fetch error is non-critical - can still view check-ins
+        const errorMessage = err?.message || "Failed to load buildings. Building filter may not work correctly.";
+        // Don't show toast - just log for debugging
+      }
+    };
+    
+    if (isAuthenticated) {
+      fetchBuildings();
     }
-  }, [router]);
+  }, [isAuthenticated]);
+
+  // Fetch check-ins with server-side filtering
+  useEffect(() => {
+    const fetchCheckIns = async () => {
+      if (!isAuthenticated) return;
+
+      try {
+        // Build filter parameters for the API
+        const filterParams: any = {};
+        
+        if (viewMode === "active") {
+          // Fetch only active check-ins (status = checked_in)
+          filterParams.status = 'checked_in';
+        }
+        
+        // Apply date filter - use filterDate if set, otherwise default to today for "all" mode
+        if (filterDate) {
+          const selectedDate = new Date(filterDate);
+          const startDate = new Date(selectedDate);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(selectedDate);
+          endDate.setHours(23, 59, 59, 999);
+          filterParams.start_date = startDate.toISOString();
+          filterParams.end_date = endDate.toISOString();
+        } else if (viewMode === "all") {
+          // Default to today for "all" mode
+          const today = new Date();
+          const startDate = new Date(today);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(today);
+          endDate.setHours(23, 59, 59, 999);
+          filterParams.start_date = startDate.toISOString();
+          filterParams.end_date = endDate.toISOString();
+        }
+        
+        // Apply floor filter if set
+        if (filterFloor && filterFloor !== "all") {
+          filterParams.floor = filterFloor;
+        }
+        
+        // Apply block filter if set
+        if (filterBlock && filterBlock !== "all") {
+          filterParams.block = filterBlock;
+        }
+        
+        // Apply building filter if set
+        if (filterBuilding && filterBuilding !== "all") {
+          filterParams.building_id = filterBuilding;
+        }
+        
+        const data = await filterCheckIns(filterParams);
+
+        // Transform API response to display format
+        const transformedData = await Promise.all(
+          data.map(async (checkIn) => {
+            // Fetch user details
+            let userName = "Unknown User";
+            let userEmail = "";
+            let userType: "employee" | "visitor" = "employee";
+            
+            if (checkIn.user_id) {
+              try {
+                const user = await userService.getUserById(checkIn.user_id);
+                userName = `${user.first_name} ${user.last_name}`;
+                userEmail = user.email;
+                userType = "employee"; // Regular users are employees
+              } catch (err) {
+                // User fetch error is non-critical - can still display check-in
+                // User name will remain "Unknown User"
+              }
+            }
+
+            const checkInTime = new Date(checkIn.check_in_time);
+            const checkOutTime = checkIn.check_out_time ? new Date(checkIn.check_out_time) : null;
+            
+            // Calculate duration
+            let duration = "N/A";
+            if (checkOutTime) {
+              const diffMs = checkOutTime.getTime() - checkInTime.getTime();
+              const hours = Math.floor(diffMs / (1000 * 60 * 60));
+              const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+              duration = `${hours}h ${minutes}m`;
+            } else if (viewMode === "active") {
+              // Calculate duration for active check-ins
+              const diffMs = Date.now() - checkInTime.getTime();
+              const hours = Math.floor(diffMs / (1000 * 60 * 60));
+              const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+              duration = `${hours}h ${minutes}m (ongoing)`;
+            }
+
+            return {
+              id: checkIn.id,
+              userId: checkIn.user_id || "",
+              userName,
+              userEmail,
+              userType,
+              programme: checkIn.programme_id, // Would need to fetch programme name
+              building: checkIn.building_id || "N/A", // Would need to fetch building name
+              floor: checkIn.floor || "N/A",
+              block: checkIn.block || "N/A",
+              date: checkInTime.toISOString().split('T')[0],
+              timeIn: checkInTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              timeOut: checkOutTime 
+                ? checkOutTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                : null,
+              duration,
+              laptop: checkIn.laptop_model || "None",
+              status: checkIn.status,
+            } as DisplayCheckIn;
+          })
+        );
+
+        setRawCheckIns(data);
+        setCheckIns(transformedData);
+      } catch (err: any) {
+        const errorMessage = err?.message || "Failed to load check-ins. Please try again.";
+        setCheckIns([]);
+        // Error will be displayed via error from hook if available
+      }
+    };
+
+    if (isAuthenticated) {
+      fetchCheckIns();
+    }
+  }, [isAuthenticated, viewMode, filterFloor, filterBlock, filterBuilding, filterDate, filterCheckIns]);
 
   const filteredCheckIns = checkIns.filter((checkIn) => {
     const matchesSearch =
       checkIn.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       checkIn.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (checkIn.hostName && checkIn.hostName.toLowerCase().includes(searchTerm.toLowerCase()));
+      checkIn.userEmail.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesFloor = !filterFloor || filterFloor === "all" || checkIn.floor === filterFloor;
     const matchesBlock = !filterBlock || filterBlock === "all" || checkIn.block === filterBlock;
-    const matchesProgramme = !filterProgramme || filterProgramme === "all" || checkIn.programme === filterProgramme;
     const matchesBuilding = !filterBuilding || filterBuilding === "all" || checkIn.building === filterBuilding;
     const matchesDate = !filterDate || checkIn.date === filterDate;
-    const matchesUserType = filterUserType === "all" || checkIn.userType === filterUserType;
 
-    return matchesSearch && matchesFloor && matchesBlock && matchesProgramme && matchesBuilding && matchesDate && matchesUserType;
+    return matchesSearch && matchesFloor && matchesBlock && matchesBuilding && matchesDate;
   });
 
   const exportCheckIns = () => {
     const csv = [
-      ["ID", "User", "Type", "Programme/Company", "Host", "Building", "Floor", "Block", "Date", "Time In", "Time Out", "Duration", "Laptop", "Purpose"],
+      ["ID", "User", "Email", "Building", "Floor", "Block", "Date", "Time In", "Time Out", "Duration", "Laptop", "Status"],
       ...filteredCheckIns.map((c) => [
         c.id,
         c.userName,
-        c.userType === "employee" ? "Employee" : "Visitor",
-        c.userType === "employee" ? (c.programme || "") : (c.company || ""),
-        c.userType === "visitor" ? (c.hostName || "") : "N/A",
+        c.userEmail,
         c.building,
         c.floor,
         c.block,
         c.date,
         c.timeIn,
-        c.timeOut,
+        c.timeOut || "N/A",
         c.duration,
         c.laptop,
-        c.purpose || "N/A"
+        c.status === "checked_in" ? "Active" : c.status === "checked_out" ? "Completed" : "Pending",
       ])
     ]
       .map((row) => row.join(","))
@@ -206,11 +250,29 @@ export default function CheckInHistoryPage() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `checkin-history-${filterUserType}.csv`;
+    a.download = `checkin-${viewMode}-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
   };
 
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading check-in history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    router.push("/admin/login");
+    return null;
+  }
+
   return (
+    <ProtectedRoute>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
@@ -229,6 +291,7 @@ export default function CheckInHistoryPage() {
           <Button
             onClick={exportCheckIns}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+              disabled={filteredCheckIns.length === 0}
           >
             <Download className="w-4 h-4" />
             <span className="hidden md:inline">Export CSV</span>
@@ -236,23 +299,47 @@ export default function CheckInHistoryPage() {
         </div>
       </div>
 
+        {/* View Mode Tabs */}
+        <div className="bg-white border-b border-gray-200 px-4 py-3">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex gap-2">
+              <Button
+                variant={viewMode === "active" ? "default" : "outline"}
+                onClick={() => setViewMode("active")}
+                className="flex items-center gap-2"
+              >
+                <UserCheck className="w-4 h-4" />
+                Active Check-Ins
+              </Button>
+              <Button
+                variant={viewMode === "all" ? "default" : "outline"}
+                onClick={() => setViewMode("all")}
+                className="flex items-center gap-2"
+              >
+                <Calendar className="w-4 h-4" />
+                All Check-Ins (Today)
+              </Button>
+            </div>
+          </div>
+        </div>
+
       {/* Stats */}
       <div className="bg-white border-b border-gray-200 px-4 py-4">
         <div className="max-w-7xl mx-auto grid grid-cols-3 gap-4">
           <Card className="p-4 bg-gradient-to-br from-gray-500 to-gray-600 text-white">
-            <div className="text-sm opacity-90">Total Check-Ins</div>
+              <div className="text-sm opacity-90">Total {viewMode === "active" ? "Active" : "Today"}</div>
             <div className="text-2xl font-bold">{filteredCheckIns.length}</div>
           </Card>
           <Card className="p-4 bg-gradient-to-br from-blue-500 to-blue-600 text-white">
-            <div className="text-sm opacity-90">Employees</div>
+              <div className="text-sm opacity-90">Checked In</div>
             <div className="text-2xl font-bold">
-              {filteredCheckIns.filter((c) => c.userType === "employee").length}
+                {filteredCheckIns.filter((c) => c.status === "checked_in").length}
             </div>
           </Card>
-          <Card className="p-4 bg-gradient-to-br from-purple-500 to-purple-600 text-white">
-            <div className="text-sm opacity-90">Visitors</div>
+            <Card className="p-4 bg-gradient-to-br from-green-500 to-green-600 text-white">
+              <div className="text-sm opacity-90">Completed</div>
             <div className="text-2xl font-bold">
-              {filteredCheckIns.filter((c) => c.userType === "visitor").length}
+                {filteredCheckIns.filter((c) => c.status === "checked_out").length}
             </div>
           </Card>
         </div>
@@ -261,28 +348,17 @@ export default function CheckInHistoryPage() {
       {/* Filters */}
       <div className="bg-white border-b border-gray-200 px-4 py-4">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div className="relative md:col-span-2">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <Input
                 type="text"
-                placeholder="Search by name, ID, or host..."
+                  placeholder="Search by name, ID, or email..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 h-10"
               />
             </div>
-
-            <Select value={filterUserType} onValueChange={setFilterUserType}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="All Users" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Users</SelectItem>
-                <SelectItem value="employee">Employees Only</SelectItem>
-                <SelectItem value="visitor">Visitors Only</SelectItem>
-              </SelectContent>
-            </Select>
 
             <Select value={filterBuilding} onValueChange={setFilterBuilding}>
               <SelectTrigger className="h-10">
@@ -290,9 +366,9 @@ export default function CheckInHistoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Buildings</SelectItem>
-                <SelectItem value="Building 41">Building 41</SelectItem>
-                <SelectItem value="Building 42">Building 42</SelectItem>
-                <SelectItem value="DSTI">DSTI Building</SelectItem>
+                {buildings.map(building => (
+                  <SelectItem key={building.id} value={building.id}>{building.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -302,9 +378,9 @@ export default function CheckInHistoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Floors</SelectItem>
-                <SelectItem value="Ground Floor">Ground Floor</SelectItem>
-                <SelectItem value="First Floor">First Floor</SelectItem>
-                <SelectItem value="Second Floor">Second Floor</SelectItem>
+                {Array.from(new Set(rawCheckIns.map(c => c.floor).filter((f): f is string => Boolean(f)))).sort().map(floor => (
+                  <SelectItem key={floor} value={floor}>{floor}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -314,23 +390,9 @@ export default function CheckInHistoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Blocks</SelectItem>
-                <SelectItem value="Block A">Block A</SelectItem>
-                <SelectItem value="Block B">Block B</SelectItem>
-                <SelectItem value="Block C">Block C</SelectItem>
-                <SelectItem value="Block D">Block D</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={filterProgramme} onValueChange={setFilterProgramme}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="All Programmes" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Programmes</SelectItem>
-                <SelectItem value="Programme 1A">Programme 1A</SelectItem>
-                <SelectItem value="Programme 1B">Programme 1B</SelectItem>
-                <SelectItem value="Programme 2">Programme 2</SelectItem>
-                <SelectItem value="Programme 3">Programme 3</SelectItem>
+                {Array.from(new Set(rawCheckIns.map(c => c.block).filter((b): b is string => Boolean(b)))).sort().map(block => (
+                  <SelectItem key={block} value={block}>{block}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -346,7 +408,27 @@ export default function CheckInHistoryPage() {
         </div>
       </div>
 
+        {/* Error Display */}
+        {error && (
+          <div className="max-w-7xl mx-auto px-4 py-4">
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+              <p className="text-red-700 text-sm">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {isLoading && (
+          <div className="max-w-7xl mx-auto px-4 py-12">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading check-ins...</p>
+            </div>
+          </div>
+        )}
+
       {/* Check-Ins List */}
+        {!isLoading && (
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="space-y-4">
           {filteredCheckIns.map((checkIn) => (
@@ -356,42 +438,20 @@ export default function CheckInHistoryPage() {
                   <div className="flex items-center gap-2 mb-2">
                     <span className="font-semibold text-lg">{checkIn.userName}</span>
                     <span className={`text-xs px-2 py-1 rounded ${
-                      checkIn.userType === "employee"
+                          checkIn.status === "checked_in"
+                            ? "bg-green-100 text-green-700"
+                            : checkIn.status === "checked_out"
                         ? "bg-blue-100 text-blue-700"
-                        : "bg-purple-100 text-purple-700"
+                            : "bg-gray-100 text-gray-700"
                     }`}>
-                      {checkIn.userType === "employee" ? "Employee" : "Visitor"}
-                    </span>
-                    {checkIn.userType === "employee" && checkIn.programme && (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                        {checkIn.programme}
+                          {checkIn.status === "checked_in" ? "ACTIVE" : 
+                           checkIn.status === "checked_out" ? "COMPLETED" : 
+                           "PENDING"}
                       </span>
-                    )}
-                    {checkIn.userType === "visitor" && checkIn.company && (
-                      <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
-                        {checkIn.company}
-                      </span>
-                    )}
                     <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                      {checkIn.id}
+                          {checkIn.id.substring(0, 8)}...
                     </span>
-                  </div>
-
-                  {/* Visitor: Show Host Information */}
-                  {checkIn.userType === "visitor" && (
-                    <div className="mb-3 p-3 bg-purple-50 rounded-lg">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-gray-600">Host:</span>{" "}
-                          <span className="font-medium text-purple-900">{checkIn.hostName}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Purpose:</span>{" "}
-                          <span className="font-medium text-purple-900">{checkIn.purpose}</span>
-                        </div>
                       </div>
-                    </div>
-                  )}
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-2">
                     <div>
@@ -407,7 +467,7 @@ export default function CheckInHistoryPage() {
                     </div>
                     <div>
                       <div className="text-gray-600 text-xs">Time Out</div>
-                      <div className="font-medium text-orange-700">{checkIn.timeOut}</div>
+                          <div className="font-medium text-orange-700">{checkIn.timeOut || "N/A"}</div>
                     </div>
                     <div>
                       <div className="text-gray-600 text-xs">Duration</div>
@@ -423,26 +483,44 @@ export default function CheckInHistoryPage() {
                       <MapPin className="w-4 h-4" />
                       <span>{checkIn.building} • {checkIn.floor} • {checkIn.block}</span>
                     </div>
+                        {checkIn.laptop && checkIn.laptop !== "None" && (
+                          <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                            💻 {checkIn.laptop}
+                          </span>
+                        )}
                   </div>
                 </div>
 
+                    {checkIn.userId && (
                 <Link href={`/admin/users/${checkIn.userId}`}>
                   <Button size="sm" variant="outline">
                     View Profile
                   </Button>
                 </Link>
+                    )}
               </div>
             </Card>
           ))}
         </div>
 
-        {filteredCheckIns.length === 0 && (
+            {filteredCheckIns.length === 0 && !isLoading && (
           <div className="text-center py-12">
             <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-600">No check-ins found matching your filters</p>
+                <p className="text-gray-600">
+                  {viewMode === "active" 
+                    ? "No active check-ins found" 
+                    : "No check-ins found matching your filters"}
+                </p>
+                {viewMode === "active" && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    All users have checked out or no check-ins were created today.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
-    </div>
+    </ProtectedRoute>
   );
 }

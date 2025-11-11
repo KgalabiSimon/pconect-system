@@ -13,494 +13,685 @@ import {
   Building2,
   MapPin,
   Layers,
-  Grid3x3
+  Grid3x3,
+  AlertCircle,
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-
-interface Building {
-  id: string;
-  name: string;
-  address: string;
-  totalFloors: number;
-  totalBlocks: number;
-  totalSpaces: number;
-  desks: number;
-  offices: number;
-  meetingRooms: number;
-  createdAt: string;
-}
+import { useAuth } from "@/hooks/api/useAuth";
+import { useBuildings } from "@/hooks/api/useBuildings";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import type { BuildingResponse, BuildingCreate, BuildingUpdate } from "@/types/api";
 
 export default function BuildingManagementPage() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
-  const [buildings, setBuildings] = useState<Building[]>([
-    {
-      id: "BLD-001",
-      name: "Building 41",
-      address: "123 Innovation Drive, Pretoria",
-      totalFloors: 3,
-      totalBlocks: 9,
-      totalSpaces: 45,
-      desks: 25,
-      offices: 10,
-      meetingRooms: 10,
-      createdAt: "2025-01-15"
-    },
-    {
-      id: "BLD-002",
-      name: "Building 42",
-      address: "456 Science Avenue, Pretoria",
-      totalFloors: 3,
-      totalBlocks: 9,
-      totalSpaces: 38,
-      desks: 20,
-      offices: 8,
-      meetingRooms: 10,
-      createdAt: "2025-01-20"
-    },
-    {
-      id: "BLD-003",
-      name: "DSTI Building",
-      address: "789 Technology Street, Pretoria",
-      totalFloors: 4,
-      totalBlocks: 12,
-      totalSpaces: 52,
-      desks: 30,
-      offices: 12,
-      meetingRooms: 10,
-      createdAt: "2025-02-01"
-    },
-  ]);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const {
+    buildings,
+    isLoading,
+    error,
+    loadBuildings,
+    createBuilding,
+    updateBuilding,
+    deleteBuilding,
+    clearError,
+    isUpdating
+  } = useBuildings({ initialLoad: true });
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
+  const [selectedBuilding, setSelectedBuilding] = useState<BuildingResponse | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [buildingToDelete, setBuildingToDelete] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const { success, error: showError, ToastContainer } = useToast();
 
   const [formData, setFormData] = useState({
+    building_code: "",
     name: "",
     address: "",
-    totalFloors: 1,
-    totalBlocks: 1,
+    floors_count: 1,
+    blocks_count: 1,
   });
 
   useEffect(() => {
-    const checkAuth = () => {
-      try {
-        const isAdminLoggedIn = sessionStorage.getItem("adminLoggedIn");
-        if (!isAdminLoggedIn) {
-          router.push("/admin/login");
-        } else {
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error("Auth check error:", error);
-        router.push("/admin/login");
-      }
+    // Load buildings when component mounts
+    if (isAuthenticated) {
+      loadBuildings();
+    }
+  }, [isAuthenticated, loadBuildings]);
+
+  // Handle search
+  useEffect(() => {
+    const searchParams = {
+      search: searchTerm || undefined,
     };
 
-    const timer = setTimeout(() => {
-      checkAuth();
-    }, 100);
+    if (searchTerm) {
+      loadBuildings(searchParams);
+    } else if (isAuthenticated) {
+      loadBuildings();
+    }
+  }, [searchTerm, loadBuildings, isAuthenticated]);
 
-    return () => clearTimeout(timer);
-  }, [router]);
+  const filteredBuildings = buildings.filter((building) =>
+    building.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    building.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    building.building_code.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  const filteredBuildings = buildings.filter((building) => {
-    const matchesSearch =
-      building.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      building.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      building.id.toLowerCase().includes(searchTerm.toLowerCase());
+  const handleDeleteClick = (buildingId: string) => {
+    setBuildingToDelete(buildingId);
+    setShowDeleteConfirm(true);
+  };
 
-    return matchesSearch;
-  });
+  const handleDeleteConfirm = async () => {
+    if (!buildingToDelete) return;
 
-  const handleDeleteBuilding = (buildingId: string) => {
-    if (confirm("Are you sure you want to delete this building? This will also delete all associated spaces.")) {
-      setBuildings(buildings.filter((b) => b.id !== buildingId));
-      alert("Building deleted successfully");
+    try {
+      const deleted = await deleteBuilding(buildingToDelete);
+      if (deleted) {
+        success("Building deleted successfully!");
+        loadBuildings(); // Reload buildings list
+      } else {
+        showError("Failed to delete building. Please try again.");
+      }
+    } catch (err: any) {
+      const errorMessage = err?.message || "Failed to delete building. Please try again.";
+      showError(errorMessage);
+    } finally {
+      setShowDeleteConfirm(false);
+      setBuildingToDelete(null);
     }
   };
 
-  const handleEditBuilding = (building: Building) => {
+  const handleEditBuilding = (building: BuildingResponse) => {
     setSelectedBuilding(building);
     setFormData({
+      building_code: building.building_code,
       name: building.name,
       address: building.address,
-      totalFloors: building.totalFloors,
-      totalBlocks: building.totalBlocks,
+      floors_count: building.floors_count,
+      blocks_count: building.blocks_count,
     });
     setShowEditModal(true);
   };
 
   const handleAddBuilding = () => {
     setFormData({
+      building_code: "",
       name: "",
       address: "",
-      totalFloors: 1,
-      totalBlocks: 1,
+      floors_count: 1,
+      blocks_count: 1,
     });
     setShowAddModal(true);
   };
 
-  const handleSaveNewBuilding = () => {
-    try {
-      if (!formData.name || !formData.address) {
-        alert("Please fill in all required fields");
-        return;
-      }
+  const handleSaveNewBuilding = async () => {
+    setFormErrors({});
+    clearError();
 
-      const newBuilding: Building = {
-        id: `BLD-${String(buildings.length + 1).padStart(3, "0")}`,
+    // Validate form
+    const newErrors: Record<string, string> = {};
+    if (!formData.building_code.trim()) {
+      newErrors.building_code = "Building code is required";
+    }
+    if (!formData.name.trim()) {
+      newErrors.name = "Building name is required";
+    }
+    if (!formData.address.trim()) {
+      newErrors.address = "Address is required";
+    }
+    if (formData.floors_count < 1) {
+      newErrors.floors_count = "Floors count must be at least 1";
+    }
+    if (formData.blocks_count < 1) {
+      newErrors.blocks_count = "Blocks count must be at least 1";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      showError("Please fill in all required fields correctly");
+      return;
+    }
+
+    try {
+      const newBuilding: BuildingCreate = {
+        building_code: formData.building_code,
         name: formData.name,
         address: formData.address,
-        totalFloors: formData.totalFloors,
-        totalBlocks: formData.totalBlocks,
-        totalSpaces: 0,
-        desks: 0,
-        offices: 0,
-        meetingRooms: 0,
-        createdAt: new Date().toISOString().split("T")[0],
+        floors_count: formData.floors_count,
+        blocks_count: formData.blocks_count,
+      };
+      const createdBuilding = await createBuilding(newBuilding);
+      if (createdBuilding) {
+        success("Building added successfully!");
+        setShowAddModal(false);
+        setFormData({
+          building_code: "",
+          name: "",
+          address: "",
+          floors_count: 1,
+          blocks_count: 1,
+        });
+        setFormErrors({});
+        loadBuildings(); // Reload buildings to show the new one
+      } else {
+        showError("Failed to add building. Please try again.");
+      }
+    } catch (err: any) {
+      let errorMessage = "Failed to add building. Please try again.";
+      
+      if (err?.details?.detail) {
+        if (Array.isArray(err.details.detail)) {
+          // Handle validation errors
+          const validationErrors: Record<string, string> = {};
+          err.details.detail.forEach((e: any) => {
+            const field = e.loc?.slice(-1)[0] || 'unknown';
+            validationErrors[field] = e.msg;
+          });
+          setFormErrors(validationErrors);
+          errorMessage = "Please fix the validation errors below";
+        } else {
+          errorMessage = err.details.detail;
+        }
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+      
+      showError(errorMessage);
+    }
+  };
+
+  const handleSaveEditBuilding = async () => {
+    if (!selectedBuilding) return;
+
+    setFormErrors({});
+    clearError();
+
+    // Validate form
+    const newErrors: Record<string, string> = {};
+    if (!formData.name.trim()) {
+      newErrors.name = "Building name is required";
+    }
+    if (!formData.address.trim()) {
+      newErrors.address = "Address is required";
+    }
+    if (formData.floors_count < 1) {
+      newErrors.floors_count = "Floors count must be at least 1";
+    }
+    if (formData.blocks_count < 1) {
+      newErrors.blocks_count = "Blocks count must be at least 1";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFormErrors(newErrors);
+      showError("Please fill in all required fields correctly");
+      return;
+    }
+
+    try {
+      const updatedBuildingData: BuildingUpdate = {
+        name: formData.name,
+        address: formData.address,
+        floors_count: formData.floors_count,
+        blocks_count: formData.blocks_count,
       };
 
-      setBuildings([...buildings, newBuilding]);
-      setShowAddModal(false);
-      alert("Building added successfully! Now add spaces to this building.");
-      router.push(`/admin/buildings/${newBuilding.id}`);
-    } catch (error) {
-      console.error("Add building error:", error);
-      alert("Failed to add building. Please try again.");
-    }
-  };
-
-  const handleSaveEditBuilding = () => {
-    try {
-      if (!selectedBuilding) return;
-
-      if (!formData.name || !formData.address) {
-        alert("Please fill in all required fields");
-        return;
+      const updatedBuilding = await updateBuilding(selectedBuilding.id, updatedBuildingData);
+      if (updatedBuilding) {
+        success("Building updated successfully!");
+        setShowEditModal(false);
+        setSelectedBuilding(null);
+        setFormErrors({});
+        loadBuildings(); // Reload buildings to show the updated one
+      } else {
+        showError("Failed to update building. Please try again.");
       }
-
-      const updatedBuildings = buildings.map((b) =>
-        b.id === selectedBuilding.id
-          ? {
-              ...b,
-              name: formData.name,
-              address: formData.address,
-              totalFloors: formData.totalFloors,
-              totalBlocks: formData.totalBlocks,
-            }
-          : b
-      );
-
-      setBuildings(updatedBuildings);
-      setShowEditModal(false);
-      setSelectedBuilding(null);
-      alert("Building updated successfully!");
-    } catch (error) {
-      console.error("Edit building error:", error);
-      alert("Failed to update building. Please try again.");
+    } catch (err: any) {
+      let errorMessage = "Failed to update building. Please try again.";
+      
+      if (err?.details?.detail) {
+        if (Array.isArray(err.details.detail)) {
+          const validationErrors: Record<string, string> = {};
+          err.details.detail.forEach((e: any) => {
+            const field = e.loc?.slice(-1)[0] || 'unknown';
+            validationErrors[field] = e.msg;
+          });
+          setFormErrors(validationErrors);
+          errorMessage = "Please fix the validation errors below";
+        } else {
+          errorMessage = err.details.detail;
+        }
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+      
+      showError(errorMessage);
     }
   };
+
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 mb-4">Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    router.push("/admin/login");
+    return null;
+  }
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading building management...</p>
+          <p className="text-gray-600 mb-4">Loading building management...</p>
+          <Link href="/admin/login">
+            <Button variant="outline" size="sm">
+              Back to Login
+            </Button>
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/admin">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">Building Management</h1>
-              <p className="text-sm text-gray-600">{filteredBuildings.length} buildings</p>
+    <ProtectedRoute>
+      <ToastContainer />
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setBuildingToDelete(null);
+        }}
+        title="Delete Building"
+        message="Are you sure you want to delete this building? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
+      <div className="min-h-screen bg-gray-50">
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 px-4 py-3 mx-4 mt-4 rounded-lg">
+            <div className="flex items-center gap-2 text-red-700">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm">{error}</span>
+              <button
+                onClick={clearError}
+                className="ml-auto text-red-500 hover:text-red-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          </div>
-          <Button
-            onClick={handleAddBuilding}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden md:inline">Add Building</span>
-          </Button>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div className="bg-white border-b border-gray-200 px-4 py-4">
-        <div className="max-w-7xl mx-auto">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Search buildings..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 h-10"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Buildings Grid */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredBuildings.map((building) => (
-            <Card key={building.id} className="p-6 hover:shadow-lg transition-shadow">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Building2 className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">{building.name}</h3>
-                    <p className="text-xs text-gray-600">{building.id}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2 mb-4">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <MapPin className="w-4 h-4" />
-                  <span className="line-clamp-1">{building.address}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <Layers className="w-4 h-4" />
-                  <span>{building.totalFloors} Floors • {building.totalBlocks} Blocks</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <Grid3x3 className="w-4 h-4" />
-                  <span>{building.totalSpaces} Total Spaces</span>
-                </div>
-              </div>
-
-              {/* Space Breakdown */}
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                <div className="bg-green-50 p-2 rounded text-center">
-                  <div className="text-xl font-bold text-green-700">{building.desks}</div>
-                  <div className="text-xs text-gray-600">Desks</div>
-                </div>
-                <div className="bg-blue-50 p-2 rounded text-center">
-                  <div className="text-xl font-bold text-blue-700">{building.offices}</div>
-                  <div className="text-xs text-gray-600">Offices</div>
-                </div>
-                <div className="bg-purple-50 p-2 rounded text-center">
-                  <div className="text-xl font-bold text-purple-700">{building.meetingRooms}</div>
-                  <div className="text-xs text-gray-600">Rooms</div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2">
-                <Link href={`/admin/buildings/${building.id}`} className="flex-1">
-                  <Button variant="outline" className="w-full" size="sm">
-                    <Eye className="w-4 h-4 mr-2" />
-                    Manage Spaces
-                  </Button>
-                </Link>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleEditBuilding(building)}
-                >
-                  <Edit className="w-4 h-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleDeleteBuilding(building.id)}
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        {filteredBuildings.length === 0 && (
-          <div className="text-center py-12">
-            <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-600">No buildings found</p>
           </div>
         )}
-      </div>
 
-      {/* Add Building Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <Card className="bg-white w-full max-w-2xl">
-            <div className="p-6">
-              <h2 className="text-2xl font-bold mb-6">Add New Building</h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Building Name *
-                  </label>
-                  <Input
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g., Building 41"
-                    className="h-10"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Address *
-                  </label>
-                  <Input
-                    value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    placeholder="123 Innovation Drive, Pretoria"
-                    className="h-10"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-2 block">
-                      Number of Floors
-                    </label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={formData.totalFloors}
-                      onChange={(e) => setFormData({ ...formData, totalFloors: parseInt(e.target.value) || 1 })}
-                      className="h-10"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-2 block">
-                      Number of Blocks
-                    </label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={formData.totalBlocks}
-                      onChange={(e) => setFormData({ ...formData, totalBlocks: parseInt(e.target.value) || 1 })}
-                      className="h-10"
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <p className="text-sm text-blue-900">
-                    ℹ️ After creating the building, you'll be able to add desks, offices, and meeting rooms to it.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 mt-6">
-                <Button
-                  onClick={handleSaveNewBuilding}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700"
-                >
-                  Create Building
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Link href="/admin">
+                <Button variant="ghost" size="sm">
+                  <ArrowLeft className="w-5 h-5" />
                 </Button>
-                <Button
-                  onClick={() => setShowAddModal(false)}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-              </div>
+              </Link>
+              <h1 className="text-xl font-semibold text-gray-800">Building Management</h1>
+            </div>
+            <Button onClick={handleAddBuilding} className="flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              <span className="hidden md:inline">Add Building</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="max-w-7xl mx-auto p-4">
+          {/* Search */}
+          <Card className="p-4 mb-6 shadow-sm">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search buildings by name, address, or code..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 border rounded-lg w-full"
+              />
             </div>
           </Card>
+
+          {/* Buildings Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredBuildings.map((building) => (
+              <Card key={building.id} className="p-6 hover:shadow-lg transition-shadow">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Building2 className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900">{building.name}</h3>
+                      <p className="text-sm text-gray-600">{building.building_code}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Link href={`/admin/buildings/${building.id}`}>
+                      <Button variant="ghost" size="icon" className="text-gray-600 hover:text-blue-600">
+                        <Eye className="w-5 h-5" />
+                      </Button>
+                    </Link>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-gray-600 hover:text-green-600"
+                      onClick={() => handleEditBuilding(building)}
+                    >
+                      <Edit className="w-5 h-5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-gray-600 hover:text-red-600"
+                      onClick={() => handleDeleteClick(building.id)}
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <MapPin className="w-4 h-4" />
+                    <span className="truncate">{building.address}</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <div className="flex items-center justify-center gap-1 text-blue-600 mb-1">
+                        <Layers className="w-4 h-4" />
+                        <span className="font-semibold">{building.floors_count}</span>
+                      </div>
+                      <p className="text-xs text-gray-600">Floors</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-center gap-1 text-green-600 mb-1">
+                        <Grid3x3 className="w-4 h-4" />
+                        <span className="font-semibold">{building.blocks_count}</span>
+                      </div>
+                      <p className="text-xs text-gray-600">Blocks</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-center gap-1 text-purple-600 mb-1">
+                        <Building2 className="w-4 h-4" />
+                        <span className="font-semibold">{building.total_spaces}</span>
+                      </div>
+                      <p className="text-xs text-gray-600">Spaces</p>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-gray-200">
+                    <p className="text-xs text-gray-500">
+                      Created: {new Date(building.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Empty State */}
+          {filteredBuildings.length === 0 && !isLoading && (
+            <Card className="p-12 text-center">
+              <Building2 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No buildings found</h3>
+              <p className="text-gray-600 mb-4">
+                {searchTerm ? "Try adjusting your search criteria." : "Get started by adding your first building."}
+              </p>
+              {!searchTerm && (
+                <Button onClick={handleAddBuilding} className="flex items-center gap-2">
+                  <Plus className="w-5 h-5" />
+                  Add Building
+                </Button>
+              )}
+            </Card>
+          )}
         </div>
-      )}
 
-      {/* Edit Building Modal */}
-      {showEditModal && selectedBuilding && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <Card className="bg-white w-full max-w-2xl">
-            <div className="p-6">
-              <h2 className="text-2xl font-bold mb-6">Edit Building</h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Building Name *
-                  </label>
-                  <Input
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g., Building 41"
-                    className="h-10"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Address *
-                  </label>
-                  <Input
-                    value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    placeholder="123 Innovation Drive, Pretoria"
-                    className="h-10"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-2 block">
-                      Number of Floors
-                    </label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={formData.totalFloors}
-                      onChange={(e) => setFormData({ ...formData, totalFloors: parseInt(e.target.value) || 1 })}
-                      className="h-10"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-2 block">
-                      Number of Blocks
-                    </label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={formData.totalBlocks}
-                      onChange={(e) => setFormData({ ...formData, totalBlocks: parseInt(e.target.value) || 1 })}
-                      className="h-10"
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-amber-50 p-4 rounded-lg">
-                  <p className="text-sm text-amber-900">
-                    ⚠️ Changing floors or blocks won't affect existing spaces. You can manage spaces separately.
-                  </p>
-                </div>
+        {/* Add Building Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <Card className="w-full max-w-lg p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Add New Building</h2>
+                <Button variant="ghost" size="icon" onClick={() => setShowAddModal(false)}>
+                  <X className="w-5 h-5" />
+                </Button>
               </div>
+              <form onSubmit={(e) => { e.preventDefault(); handleSaveNewBuilding(); }} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Building Code</label>
+                  <Input
+                    type="text"
+                    value={formData.building_code}
+                    onChange={(e) => {
+                      setFormData({ ...formData, building_code: e.target.value });
+                      setFormErrors({ ...formErrors, building_code: "" });
+                    }}
+                    placeholder="BLD-001"
+                    className={`h-10 ${formErrors.building_code ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.building_code && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.building_code}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Building Name</label>
+                  <Input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      setFormErrors({ ...formErrors, name: "" });
+                    }}
+                    placeholder="Building 41"
+                    className={`h-10 ${formErrors.name ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.name && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.name}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                  <Input
+                    type="text"
+                    value={formData.address}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      setFormErrors({ ...formErrors, address: "" });
+                    }}
+                    placeholder="123 Innovation Drive, Pretoria"
+                    className={`h-10 ${formErrors.address ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.address && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.address}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Floors</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.floors_count}
+                    onChange={(e) => {
+                      setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, floors_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.floors_count ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.floors_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.floors_count}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Blocks</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.blocks_count}
+                    onChange={(e) => {
+                      setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, blocks_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.blocks_count ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.blocks_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.blocks_count}</p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 mt-6">
+                  <Button
+                    onClick={handleSaveNewBuilding}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700"
+                    disabled={isUpdating}
+                  >
+                    {isUpdating ? "Adding..." : "Add Building"}
+                  </Button>
+                  <Button
+                    onClick={() => setShowAddModal(false)}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          </div>
+        )}
+
+        {/* Edit Building Modal */}
+        {showEditModal && selectedBuilding && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <Card className="w-full max-w-lg p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Edit Building</h2>
+                <Button variant="ghost" size="icon" onClick={() => setShowEditModal(false)}>
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+              <form onSubmit={(e) => { e.preventDefault(); handleSaveEditBuilding(); }} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Building Code</label>
+                  <Input
+                    type="text"
+                    value={formData.building_code}
+                    onChange={(e) => setFormData({ ...formData, building_code: e.target.value })}
+                    placeholder="BLD-001"
+                    className="h-10"
+                    disabled // Building code cannot be changed
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Building Name</label>
+                  <Input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      setFormErrors({ ...formErrors, name: "" });
+                    }}
+                    placeholder="Building 41"
+                    className={`h-10 ${formErrors.name ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.name && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.name}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                  <Input
+                    type="text"
+                    value={formData.address}
+                    onChange={(e) => {
+                      setFormData({ ...formData, address: e.target.value });
+                      setFormErrors({ ...formErrors, address: "" });
+                    }}
+                    placeholder="123 Innovation Drive, Pretoria"
+                    className={`h-10 ${formErrors.address ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.address && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.address}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Floors</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.floors_count}
+                    onChange={(e) => {
+                      setFormData({ ...formData, floors_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, floors_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.floors_count ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.floors_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.floors_count}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Number of Blocks</label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={formData.blocks_count}
+                    onChange={(e) => {
+                      setFormData({ ...formData, blocks_count: parseInt(e.target.value) || 1 });
+                      setFormErrors({ ...formErrors, blocks_count: "" });
+                    }}
+                    className={`h-10 ${formErrors.blocks_count ? "border-red-500" : ""}`}
+                    required
+                  />
+                  {formErrors.blocks_count && (
+                    <p className="text-red-600 text-xs mt-1">{formErrors.blocks_count}</p>
+                  )}
+                </div>
+              </form>
 
               <div className="flex items-center gap-3 mt-6">
                 <Button
                   onClick={handleSaveEditBuilding}
                   className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  disabled={isUpdating}
                 >
-                  Save Changes
+                  {isUpdating ? "Saving..." : "Save Changes"}
                 </Button>
                 <Button
                   onClick={() => {
@@ -513,10 +704,10 @@ export default function BuildingManagementPage() {
                   Cancel
                 </Button>
               </div>
-            </div>
-          </Card>
-        </div>
-      )}
-    </div>
+            </Card>
+          </div>
+        )}
+      </div>
+    </ProtectedRoute>
   );
 }
