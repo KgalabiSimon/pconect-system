@@ -46,4 +46,4 @@ jobs:
           app-name: 'pconect'
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_FD4BD71F33C64884ADE9A38ECB92EFA9 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_A6E212DB22224A3786DD33BE489154D4 }}
