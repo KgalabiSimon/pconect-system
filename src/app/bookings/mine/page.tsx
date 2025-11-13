@@ -61,7 +61,11 @@ export default function MyBookingsPage() {
       const buildingId = booking.building_id || "";
       const buildingName = buildingId ? (buildingMap[buildingId] || buildingId) : "Unknown Building";
       const spaceType = booking.space_type || booking.space?.type || "DESK";
-      const spaceName = booking.space?.name || `${spaceType} ${booking.id.slice(-3)}`;
+      const spaceDetails = booking.space;
+      const spaceName =
+        spaceDetails && "name" in spaceDetails && typeof spaceDetails.name === "string"
+          ? spaceDetails.name
+          : `${spaceType} ${booking.id.slice(-3)}`;
       
       // Map space type to display type
       const displayType = spaceType === "DESK" ? "desk" : spaceType === "OFFICE" ? "office" : "meeting_room";

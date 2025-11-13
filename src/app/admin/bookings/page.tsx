@@ -19,28 +19,66 @@ import {
   Calendar,
   Clock,
   Users,
-  Mail,
   Download,
-  Filter
+  X
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/hooks/api/useAuth";
 import { useBookings } from "@/hooks/api/useBookings";
 import { useUsers } from "@/hooks/api/useUsers";
 import { useBuildings } from "@/hooks/api/useBuildings";
+import { useSpaces } from "@/hooks/api/useSpaces";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { BookingResponse } from "@/types/api";
 
+type SpaceTypeOption = "DESK" | "OFFICE" | "ROOM";
+
+const SPACE_TYPE_OPTIONS: { value: SpaceTypeOption; label: string }[] = [
+  { value: "DESK", label: "Desk" },
+  { value: "OFFICE", label: "Office" },
+  { value: "ROOM", label: "Meeting Room" },
+];
+
+const sanitizeTime = (time?: string) => {
+  if (!time) return "";
+  const withoutZone = time.replace("Z", "");
+  const [hours = "", minutes = ""] = withoutZone.split(":");
+  if (hours && minutes) {
+    return `${hours}:${minutes}`;
+  }
+  return withoutZone;
+};
+
+const formatTimeDisplay = (start?: string, end?: string) => {
+  const formattedStart = sanitizeTime(start);
+  const formattedEnd = sanitizeTime(end);
+  if (formattedStart && formattedEnd) {
+    return `${formattedStart} - ${formattedEnd}`;
+  }
+  return formattedStart || formattedEnd || "N/A";
+};
+
+const formatDateOnly = (value?: string) => {
+  if (!value) return "";
+  return value.split("T")[0] || value;
+};
+
+const prepareTimeForApi = (time: string) => {
+  if (!time) return "";
+  return time.length === 5 ? `${time}:00` : time;
+};
+
 export default function BookingManagementPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { getAdminBookings, updateBooking, deleteBooking, isLoading, error, clearError } = useBookings();
+  const { getAdminBookings, updateBooking, deleteBooking, createBooking, isLoading, error, clearError } = useBookings();
   const { users, loadUsers } = useUsers({ initialLoad: false });
   const { buildings, loadBuildings } = useBuildings({ initialLoad: false });
+  const { spaces, loadSpaces } = useSpaces();
   const [bookings, setBookings] = useState<BookingResponse[]>([]);
   const [userMap, setUserMap] = useState<Record<string, { name: string; email: string }>>({});
   const [buildingMap, setBuildingMap] = useState<Record<string, string>>({});
@@ -50,13 +88,13 @@ export default function BookingManagementPage() {
   const [filterBuilding, setFilterBuilding] = useState("");
   const [filterDate, setFilterDate] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [bookingToDelete, setBookingToDelete] = useState<string | null>(null);
   const [loadingErrors, setLoadingErrors] = useState<{
     bookings?: string;
     users?: string;
     buildings?: string;
+    spaces?: string;
   }>({});
   const { success, error: showError, ToastContainer } = useToast();
 
@@ -66,6 +104,7 @@ export default function BookingManagementPage() {
       loadBookings();
       loadUsersData();
       loadBuildingsData();
+      loadSpacesData();
     }
   }, [isAuthenticated]);
 
@@ -109,40 +148,235 @@ export default function BookingManagementPage() {
 
   const loadUsersData = async () => {
     try {
-      setLoadingErrors({ ...loadingErrors, users: undefined });
+      setLoadingErrors((prev) => ({ ...prev, users: undefined }));
       await loadUsers();
-      // Build user map for quick lookup
-      const map: Record<string, { name: string; email: string }> = {};
-      users.forEach(user => {
-        map[user.id] = {
-          name: `${user.first_name} ${user.last_name}`,
-          email: user.email,
-        };
-      });
-      setUserMap(map);
     } catch (err: any) {
       const errorMessage = err?.message || 'Failed to load users. Some names may not display correctly.';
-      setLoadingErrors({ ...loadingErrors, users: errorMessage });
+      setLoadingErrors((prev) => ({ ...prev, users: errorMessage }));
       // Don't show toast for this as it's not critical - users can still see bookings
     }
   };
 
   const loadBuildingsData = async () => {
     try {
-      setLoadingErrors({ ...loadingErrors, buildings: undefined });
+      setLoadingErrors((prev) => ({ ...prev, buildings: undefined }));
       await loadBuildings();
-      // Build building map for quick lookup
-      const map: Record<string, string> = {};
-      buildings.forEach(building => {
-        map[building.id] = building.name;
-      });
-      setBuildingMap(map);
     } catch (err: any) {
       const errorMessage = err?.message || 'Failed to load buildings. Some building names may not display correctly.';
-      setLoadingErrors({ ...loadingErrors, buildings: errorMessage });
+      setLoadingErrors((prev) => ({ ...prev, buildings: errorMessage }));
       // Don't show toast for this as it's not critical - bookings can still be viewed
     }
   };
+
+  const loadSpacesData = async () => {
+    try {
+      setLoadingErrors((prev) => ({ ...prev, spaces: undefined }));
+      await loadSpaces();
+    } catch (err: any) {
+      const errorMessage = err?.message || 'Failed to load spaces. Space details may show IDs only.';
+      setLoadingErrors((prev) => ({ ...prev, spaces: errorMessage }));
+    }
+  };
+
+  const resetFormErrors = () => setFormErrors({});
+
+  const handleOpenAddModal = () => {
+    resetFormErrors();
+    const defaultUser = userOptions[0]?.value || "";
+    const defaultBuilding = buildingOptionsMemo[0]?.value || "";
+    setAddForm({
+      ...defaultAddFormState,
+      userId: defaultUser,
+      buildingId: defaultBuilding,
+    });
+    setShowAddModal(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setShowAddModal(false);
+    setAddForm(defaultAddFormState);
+    resetFormErrors();
+    setIsSubmitting(false);
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditModal(false);
+    setSelectedBooking(null);
+    resetFormErrors();
+    setIsSubmitting(false);
+  };
+
+  const validateForm = (form: typeof addForm) => {
+    const errors: Record<string, string> = {};
+    if (!form.userId) errors.userId = "User is required";
+    if (!form.buildingId) errors.buildingId = "Building is required";
+    if (!form.date) errors.date = "Date is required";
+    if (!form.startTime) errors.startTime = "Start time is required";
+    if (!form.endTime) errors.endTime = "End time is required";
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleCreateBooking = async () => {
+    if (!validateForm(addForm)) return;
+
+    try {
+      setIsSubmitting(true);
+      const payload = {
+        user_id: addForm.userId,
+        building_id: addForm.buildingId,
+        floor: addForm.floor ? Number(addForm.floor) : 0,
+        space_type: addForm.spaceType,
+        booking_date: `${addForm.date}T00:00:00Z`,
+        start_time: prepareTimeForApi(addForm.startTime),
+        end_time: prepareTimeForApi(addForm.endTime),
+      };
+
+      const created = await createBooking(payload);
+      if (created) {
+        success("Booking created successfully!");
+        handleCloseAddModal();
+        loadBookings();
+      } else {
+        showError("Failed to create booking. Please try again.");
+      }
+    } catch (err: any) {
+      const errorMessage = err?.message || "Failed to create booking. Please try again.";
+      showError(errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEditClick = (booking: BookingResponse) => {
+    setSelectedBooking(booking);
+    resetFormErrors();
+    const bookingBuildingId = booking.building_id || booking.space?.building_id || "";
+    setEditForm({
+      userId: booking.user_id || "",
+      buildingId: bookingBuildingId,
+      spaceType: (booking.space_type || booking.space?.type || "DESK") as SpaceTypeOption,
+      floor: "",
+      date: formatDateOnly(booking.booking_date),
+      startTime: sanitizeTime(booking.start_time),
+      endTime: sanitizeTime(booking.end_time),
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateBooking = async () => {
+    if (!selectedBooking) return;
+    if (!validateForm(editForm)) return;
+
+    try {
+      setIsSubmitting(true);
+      const payload = {
+        user_id: editForm.userId || undefined,
+        building_id: editForm.buildingId || undefined,
+        floor: editForm.floor ? Number(editForm.floor) : undefined,
+        space_type: editForm.spaceType,
+        booking_date: editForm.date ? `${editForm.date}T00:00:00Z` : undefined,
+        start_time: editForm.startTime ? prepareTimeForApi(editForm.startTime) : undefined,
+        end_time: editForm.endTime ? prepareTimeForApi(editForm.endTime) : undefined,
+      };
+
+      const updated = await updateBooking(selectedBooking.id, payload);
+      if (updated) {
+        success("Booking updated successfully!");
+        handleCloseEditModal();
+        loadBookings();
+      } else {
+        showError("Failed to update booking. Please try again.");
+      }
+    } catch (err: any) {
+      const errorMessage = err?.message || "Failed to update booking. Please try again.";
+      showError(errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Build lookup maps whenever data changes
+  useEffect(() => {
+    const map: Record<string, { name: string; email: string }> = {};
+    users.forEach((user) => {
+      map[user.id] = {
+        name: `${user.first_name} ${user.last_name}`.trim() || user.email || 'Unknown User',
+        email: user.email,
+      };
+    });
+    setUserMap(map);
+  }, [users]);
+
+  useEffect(() => {
+    const map: Record<string, string> = {};
+    buildings.forEach((building) => {
+      map[building.id] = building.name;
+    });
+    setBuildingMap(map);
+  }, [buildings]);
+
+  const defaultAddFormState = {
+    userId: "",
+    buildingId: "",
+    spaceType: "DESK" as SpaceTypeOption,
+    floor: "",
+    date: "",
+    startTime: "",
+    endTime: "",
+  };
+
+  const [spaceMap, setSpaceMap] = useState<Record<string, { label: string; type?: string; quantity?: number; building_id?: string }>>({});
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<BookingResponse | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [addForm, setAddForm] = useState(defaultAddFormState);
+  const [editForm, setEditForm] = useState({
+    userId: "",
+    buildingId: "",
+    spaceType: "DESK" as SpaceTypeOption,
+    floor: "",
+    date: "",
+    startTime: "",
+    endTime: "",
+  });
+
+  useEffect(() => {
+    const map: Record<string, { label: string; type?: string; quantity?: number; building_id?: string }> = {};
+    spaces.forEach((space) => {
+      const typeOption = SPACE_TYPE_OPTIONS.find((option) => option.value === space.type);
+      const typeLabel = typeOption ? typeOption.label : "Space";
+      const quantityLabel = space.quantity ? ` • ${space.quantity} available` : "";
+      map[space.id] = {
+        label: `${typeLabel}${quantityLabel}`,
+        type: space.type,
+        quantity: space.quantity,
+        building_id: space.building_id,
+      };
+    });
+    setSpaceMap(map);
+  }, [spaces]);
+
+  const userOptions = useMemo(
+    () =>
+      users.map((user) => ({
+        value: user.id,
+        label: `${user.first_name} ${user.last_name}`.trim() || user.email || "Unknown User",
+        email: user.email,
+      })),
+    [users]
+  );
+
+  const buildingOptionsMemo = useMemo(
+    () =>
+      buildings.map((building) => ({
+        value: building.id,
+        label: building.name,
+      })),
+    [buildings]
+  );
 
   // Show loading state while checking authentication
   if (authLoading) {
@@ -163,9 +397,14 @@ export default function BookingManagementPage() {
   }
 
   const filteredBookings = bookings.filter((booking) => {
-    const user = userMap[booking.user_id];
-    const userName = user?.name || 'Unknown User';
-    const userEmail = user?.email || '';
+    const userFromBooking = booking.user ? {
+      name: `${booking.user.first_name} ${booking.user.last_name}`.trim(),
+      email: booking.user.email,
+    } : null;
+
+    const mappedUser = userMap[booking.user_id];
+    const userName = mappedUser?.name || userFromBooking?.name || 'Unknown User';
+    const userEmail = mappedUser?.email || userFromBooking?.email || '';
     
     const matchesSearch =
       userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -181,9 +420,11 @@ export default function BookingManagementPage() {
     
     // Note: BookingResponse doesn't have building_id directly, but we can filter by it if available
     // For now, we'll check if the booking has a building_id field or skip building filter
+    const bookingBuildingId = booking.building_id || booking.space?.building_id;
     const matchesBuilding = !filterBuilding || filterBuilding === "all" || 
-      (booking as any).building_id === filterBuilding;
-    const matchesDate = !filterDate || booking.booking_date.split('T')[0] === filterDate;
+      bookingBuildingId === filterBuilding;
+    const bookingDateOnly = formatDateOnly(booking.booking_date);
+    const matchesDate = !filterDate || bookingDateOnly === filterDate;
     const matchesStatus = !filterStatus || filterStatus === "all" || booking.status === filterStatus;
 
     return matchesSearch && matchesType && matchesBuilding && matchesDate && matchesStatus;
@@ -191,12 +432,10 @@ export default function BookingManagementPage() {
 
   // Calculate stats
   const today = new Date().toISOString().split('T')[0];
-  const bookingsToday = bookings.filter(
-    (b) => {
-      const bookingDate = b.booking_date.split('T')[0];
-      return bookingDate === today && (b.status === "pending" || b.status === "checked_in");
-    }
-  ).length;
+  const bookingsToday = bookings.filter((b) => {
+    const bookingDate = formatDateOnly(b.booking_date);
+    return bookingDate === today && (b.status === "pending" || b.status === "checked_in");
+  }).length;
 
   const bookingsThisWeek = bookings.filter((b) => {
     const bookingDate = new Date(b.booking_date);
@@ -239,20 +478,24 @@ export default function BookingManagementPage() {
   const exportBookings = () => {
     try {
       const csv = [
-        ["ID", "User", "Email", "Type", "Space ID", "Building", "Date", "Time", "Status"],
+        ["ID", "User", "Email", "Space", "Building", "Date", "Time", "Status"],
         ...filteredBookings.map((b) => {
-          const user = userMap[b.user_id];
-          const buildingName = buildingMap[b.building_id || ''] || b.building_id || 'Unknown';
-          const date = new Date(b.booking_date).toISOString().split('T')[0];
+          const user = userMap[b.user_id] || (b.user ? {
+            name: `${b.user.first_name} ${b.user.last_name}`.trim(),
+            email: b.user.email,
+          } : undefined);
+          const bookingBuildingId = b.building_id || b.space?.building_id || '';
+          const buildingName = buildingMap[bookingBuildingId] || bookingBuildingId || 'Unknown';
+          const spaceInfo = spaceMap[b.space_id || ''];
+          const date = formatDateOnly(b.booking_date);
           return [
             b.id,
             user?.name || 'Unknown',
             user?.email || '',
-            (b.space_type || b.space?.type) || 'N/A',
-            b.space_id || 'N/A',
+            spaceInfo?.label || (b.space_type || b.space?.type) || 'N/A',
             buildingName,
             date,
-            `${b.start_time}-${b.end_time}`,
+            formatTimeDisplay(b.start_time, b.end_time),
             b.status
           ];
         })
@@ -318,6 +561,7 @@ export default function BookingManagementPage() {
             <Button
               size="sm"
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+              onClick={handleOpenAddModal}
             >
               <Plus className="w-4 h-4" />
               <span className="hidden md:inline">New Booking</span>
@@ -420,7 +664,7 @@ export default function BookingManagementPage() {
       )}
 
       {/* Loading Errors (non-critical) */}
-      {(loadingErrors.users || loadingErrors.buildings) && (
+      {(loadingErrors.users || loadingErrors.buildings || loadingErrors.spaces) && (
         <div className="max-w-7xl mx-auto px-4 py-2">
           <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-sm">
             {loadingErrors.users && (
@@ -428,6 +672,9 @@ export default function BookingManagementPage() {
             )}
             {loadingErrors.buildings && (
               <p className="text-amber-700">{loadingErrors.buildings}</p>
+            )}
+            {loadingErrors.spaces && (
+              <p className="text-amber-700">{loadingErrors.spaces}</p>
             )}
           </div>
         </div>
@@ -447,25 +694,31 @@ export default function BookingManagementPage() {
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="space-y-4">
           {filteredBookings.map((booking) => {
-            const user = userMap[booking.user_id];
-            const userName = user?.name || 'Unknown User';
-            const userEmail = user?.email || '';
-            // Note: BookingResponse may not have building_id directly, check if available
-            const buildingId = (booking as any).building_id;
-            const buildingName = buildingId ? (buildingMap[buildingId] || buildingId) : 'Unknown Building';
-            const bookingDate = new Date(booking.booking_date);
-            const displayDate = bookingDate.toISOString().split('T')[0];
+            const mappedUser = userMap[booking.user_id];
+            const userFromBooking = booking.user ? {
+              name: `${booking.user.first_name} ${booking.user.last_name}`.trim(),
+              email: booking.user.email,
+            } : null;
+            const userName = mappedUser?.name || userFromBooking?.name || 'Unknown User';
+            const userEmail = mappedUser?.email || userFromBooking?.email || '';
+            const bookingBuildingId = booking.building_id || booking.space?.building_id;
+            const buildingName = bookingBuildingId ? (buildingMap[bookingBuildingId] || bookingBuildingId) : 'Unknown Building';
+            const displayDate = formatDateOnly(booking.booking_date);
             const spaceType = booking.space_type || booking.space?.type;
             const spaceTypeDisplay = spaceType === 'DESK' ? 'Desk' : 
                                     spaceType === 'OFFICE' ? 'Office' : 
                                     spaceType === 'ROOM' ? 'Meeting Room' : spaceType || 'Unknown';
+            const spaceInfo = spaceMap[booking.space_id || ''];
+            const spaceLabel = spaceInfo?.label || spaceTypeDisplay;
             
             return (
               <Card key={booking.id} className="p-6">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="font-semibold text-lg">Space ID: {booking.space_id?.substring(0, 8)}...</span>
+                      <span className="font-semibold text-lg">
+                        {spaceLabel}
+                      </span>
                       <span className={`text-xs px-2 py-1 rounded ${
                         spaceType === "ROOM"
                           ? "bg-purple-100 text-purple-700"
@@ -494,7 +747,10 @@ export default function BookingManagementPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
                       <div className="flex items-center gap-2">
                         <Users className="w-4 h-4 text-gray-500" />
-                        <span>{userName}</span>
+                        <span>
+                          <span className="block font-medium">{userName}</span>
+                          {userEmail && <span className="text-xs text-gray-500">{userEmail}</span>}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-gray-500" />
@@ -502,10 +758,10 @@ export default function BookingManagementPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="w-4 h-4 text-gray-500" />
-                        <span>{booking.start_time} - {booking.end_time}</span>
+                        <span>{formatTimeDisplay(booking.start_time, booking.end_time)}</span>
                       </div>
                       <div className="text-gray-600">
-                        {buildingName}
+                        {buildingName || 'Unknown Building'}
                       </div>
                     </div>
 
@@ -517,7 +773,12 @@ export default function BookingManagementPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" title="Edit Booking">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Edit Booking"
+                      onClick={() => handleEditClick(booking)}
+                    >
                       <Edit className="w-4 h-4" />
                     </Button>
                     <Button
@@ -544,6 +805,281 @@ export default function BookingManagementPage() {
         )}
       </div>
     </div>
+    {showAddModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+        <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-semibold">Create Booking</h2>
+              <button
+                onClick={handleCloseAddModal}
+                className="p-2 rounded-full hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Employee *</label>
+                <Select
+                  value={addForm.userId}
+                  onValueChange={(value) => setAddForm((prev) => ({ ...prev, userId: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {userOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.userId && <p className="text-xs text-red-600 mt-1">{formErrors.userId}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Building *</label>
+                <Select
+                  value={addForm.buildingId}
+                  onValueChange={(value) => setAddForm((prev) => ({ ...prev, buildingId: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Select building" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {buildingOptionsMemo.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.buildingId && <p className="text-xs text-red-600 mt-1">{formErrors.buildingId}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Space Type *</label>
+                <Select
+                  value={addForm.spaceType}
+                  onValueChange={(value: SpaceTypeOption) => setAddForm((prev) => ({ ...prev, spaceType: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Select space type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SPACE_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Floor</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={addForm.floor}
+                  onChange={(e) => setAddForm((prev) => ({ ...prev, floor: e.target.value }))}
+                  placeholder="0"
+                  className="h-10"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Date *</label>
+                <Input
+                  type="date"
+                  value={addForm.date}
+                  onChange={(e) => setAddForm((prev) => ({ ...prev, date: e.target.value }))}
+                  className="h-10"
+                />
+                {formErrors.date && <p className="text-xs text-red-600 mt-1">{formErrors.date}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Start Time *</label>
+                <Input
+                  type="time"
+                  value={addForm.startTime}
+                  onChange={(e) => setAddForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                  className="h-10"
+                />
+                {formErrors.startTime && <p className="text-xs text-red-600 mt-1">{formErrors.startTime}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">End Time *</label>
+                <Input
+                  type="time"
+                  value={addForm.endTime}
+                  onChange={(e) => setAddForm((prev) => ({ ...prev, endTime: e.target.value }))}
+                  className="h-10"
+                />
+                {formErrors.endTime && <p className="text-xs text-red-600 mt-1">{formErrors.endTime}</p>}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 mt-6">
+              <Button
+                onClick={handleCreateBooking}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Creating..." : "Create Booking"}
+              </Button>
+              <Button onClick={handleCloseAddModal} variant="outline" className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    )}
+
+    {showEditModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+        <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-semibold">Edit Booking</h2>
+              <button
+                onClick={handleCloseEditModal}
+                className="p-2 rounded-full hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Employee *</label>
+                <Select
+                  value={editForm.userId}
+                  onValueChange={(value) => setEditForm((prev) => ({ ...prev, userId: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {userOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.userId && <p className="text-xs text-red-600 mt-1">{formErrors.userId}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Building *</label>
+                <Select
+                  value={editForm.buildingId}
+                  onValueChange={(value) => setEditForm((prev) => ({ ...prev, buildingId: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Select building" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {buildingOptionsMemo.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.buildingId && <p className="text-xs text-red-600 mt-1">{formErrors.buildingId}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Space Type *</label>
+                <Select
+                  value={editForm.spaceType}
+                  onValueChange={(value: SpaceTypeOption) => setEditForm((prev) => ({ ...prev, spaceType: value }))}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Select space type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SPACE_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Floor</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={editForm.floor}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, floor: e.target.value }))}
+                  placeholder="0"
+                  className="h-10"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Date *</label>
+                <Input
+                  type="date"
+                  value={editForm.date}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, date: e.target.value }))}
+                  className="h-10"
+                />
+                {formErrors.date && <p className="text-xs text-red-600 mt-1">{formErrors.date}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">Start Time *</label>
+                <Input
+                  type="time"
+                  value={editForm.startTime}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                  className="h-10"
+                />
+                {formErrors.startTime && <p className="text-xs text-red-600 mt-1">{formErrors.startTime}</p>}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">End Time *</label>
+                <Input
+                  type="time"
+                  value={editForm.endTime}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, endTime: e.target.value }))}
+                  className="h-10"
+                />
+                {formErrors.endTime && <p className="text-xs text-red-600 mt-1">{formErrors.endTime}</p>}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 mt-6">
+              <Button
+                onClick={handleUpdateBooking}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Saving..." : "Save Changes"}
+              </Button>
+              <Button onClick={handleCloseEditModal} variant="outline" className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    )}
     </ProtectedRoute>
   );
 }

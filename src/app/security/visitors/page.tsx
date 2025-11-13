@@ -56,8 +56,8 @@ export default function VisitorRegisterPage() {
       const filtered = visitors.filter(visitor =>
         visitor.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         visitor.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        visitor.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        visitor.host_employee_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (visitor.company?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false) ||
+        (visitor.host_employee_name?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false) ||
         visitor.mobile.includes(searchTerm)
       );
       setFilteredVisitors(filtered);
@@ -164,8 +164,11 @@ export default function VisitorRegisterPage() {
 
         {/* Visitor List */}
         <div className="space-y-3">
-          {filteredVisitors.map((visitor) => (
-            <Card key={visitor.id} className="bg-gray-800 border-gray-700 p-4">
+          {filteredVisitors.map((visitor) => {
+            const status = (visitor as { status?: string }).status ?? "REGISTERED";
+            const checkInTime = (visitor as { check_in_time?: string }).check_in_time;
+            return (
+              <Card key={visitor.id} className="bg-gray-800 border-gray-700 p-4">
               <div className="flex items-start gap-4">
                 {/* Photo */}
                 <div className="w-16 h-16 bg-orange-600 rounded-full flex items-center justify-center text-white text-lg font-bold flex-shrink-0">
@@ -179,34 +182,46 @@ export default function VisitorRegisterPage() {
                       <h3 className="text-white font-bold text-lg">{visitor.first_name} {visitor.last_name}</h3>
                       <p className="text-gray-400 text-sm">{visitor.company}</p>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      visitor.status === 'CHECKED_IN' ? 'text-green-400 bg-green-900/30' :
-                      visitor.status === 'CHECKED_OUT' ? 'text-gray-400 bg-gray-900/30' :
-                      'text-orange-400 bg-orange-900/30'
-                    }`}>
-                      {visitor.status}
-                    </span>
+                    {(() => {
+                      const statusClasses =
+                        status === "CHECKED_IN"
+                          ? "text-green-400 bg-green-900/30"
+                          : status === "CHECKED_OUT"
+                          ? "text-gray-400 bg-gray-900/30"
+                          : "text-orange-400 bg-orange-900/30";
+                      return (
+                        <span className={`text-xs px-2 py-1 rounded ${statusClasses}`}>
+                          {status}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <div className="space-y-2 text-sm mb-2">
                     <div className="flex items-center gap-2">
                       <span className="text-gray-500 text-xs">Host:</span>
-                      <span className="text-white font-medium">{visitor.host_employee_name}</span>
+                      <span className="text-white font-medium">
+                        {visitor.host_employee_name ?? "Unknown"}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-gray-500 text-xs">Purpose:</span>
-                      <span className="text-gray-300">{visitor.visit_purpose}</span>
+                      <span className="text-gray-300">
+                        {(visitor as { visit_purpose?: string; purpose?: string }).visit_purpose ??
+                          visitor.purpose ??
+                          "Not specified"}
+                      </span>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-sm mb-2">
                     <div>
                       <p className="text-gray-500 text-xs">Floor</p>
-                      <p className="text-white font-medium">{visitor.floor}</p>
+                      <p className="text-white font-medium">{visitor.floor ?? "N/A"}</p>
                     </div>
                     <div>
                       <p className="text-gray-500 text-xs">Block</p>
-                      <p className="text-white font-medium">{visitor.block}</p>
+                      <p className="text-white font-medium">{visitor.block ?? "N/A"}</p>
                     </div>
                   </div>
 
@@ -214,14 +229,16 @@ export default function VisitorRegisterPage() {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-gray-400">{visitor.mobile}</span>
                       <span className="text-gray-500">
-                        {visitor.check_in_time ? `In: ${new Date(visitor.check_in_time).toLocaleTimeString()}` : 'Not checked in'}
+                        {checkInTime
+                          ? `In: ${new Date(checkInTime).toLocaleTimeString()}`
+                          : "Not checked in"}
                       </span>
                     </div>
                   </div>
 
                   {/* Action Buttons */}
                   <div className="flex gap-2 mt-3">
-                    {visitor.status === 'REGISTERED' && (
+                    {status === 'REGISTERED' && (
                       <Button
                         onClick={() => handleCheckIn(visitor.id)}
                         size="sm"
@@ -230,7 +247,7 @@ export default function VisitorRegisterPage() {
                         Check In
                       </Button>
                     )}
-                    {visitor.status === 'CHECKED_IN' && (
+                    {status === 'CHECKED_IN' && (
                       <Button
                         onClick={() => handleCheckOut(visitor.id)}
                         size="sm"
@@ -242,8 +259,9 @@ export default function VisitorRegisterPage() {
                   </div>
                 </div>
               </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </div>
 
         {filteredVisitors.length === 0 && (

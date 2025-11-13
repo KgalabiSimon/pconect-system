@@ -44,7 +44,7 @@ export class VisitorsService {
    */
   async updateVisitor(id: string, data: VisitorUpdate): Promise<VisitorResponse> {
     const response = await apiClient.put<VisitorResponse>(
-      API_ENDPOINTS.VISITORS.UPDATE(id),
+      `/api/v1/visitors/${id}`,
       data
     );
     return response.data;
@@ -54,7 +54,7 @@ export class VisitorsService {
    * Delete visitor
    */
   async deleteVisitor(id: string): Promise<void> {
-    await apiClient.delete(API_ENDPOINTS.VISITORS.DELETE(id));
+    await apiClient.delete(`/api/v1/visitors/${id}`);
   }
 
   /**
@@ -74,10 +74,16 @@ export class VisitorsService {
    */
   async searchVisitors(searchParams: VisitorSearch): Promise<VisitorResponse[]> {
     const queryParams = new URLSearchParams();
+
+    const { name, mobile, purpose } = searchParams as {
+      name?: string;
+      mobile?: string;
+      purpose?: string;
+    };
     
-    if (searchParams.name) queryParams.append('name', searchParams.name);
-    if (searchParams.mobile) queryParams.append('mobile', searchParams.mobile);
-    if (searchParams.purpose) queryParams.append('purpose', searchParams.purpose);
+    if (name) queryParams.append('name', name);
+    if (mobile) queryParams.append('mobile', mobile);
+    if (purpose) queryParams.append('purpose', purpose);
     
     const url = `${API_ENDPOINTS.VISITORS.FILTER}${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
     const response = await apiClient.get<VisitorResponse[]>(url);
@@ -131,9 +137,10 @@ export class VisitorsService {
     const allVisitors = response.data;
     
     // Filter for active visitors
-    const activeVisitors = allVisitors.filter(visitor => 
-      visitor.status === 'CHECKED_IN'
-    );
+    const activeVisitors = allVisitors.filter((visitor) => {
+      const status = (visitor as { status?: string }).status;
+      return status === 'CHECKED_IN';
+    });
     
     return activeVisitors;
   }
@@ -183,9 +190,9 @@ export class VisitorsService {
     
     const stats = {
       total: allVisitors.length,
-      checkedIn: allVisitors.filter(v => v.status === 'CHECKED_IN').length,
-      checkedOut: allVisitors.filter(v => v.status === 'CHECKED_OUT').length,
-      registered: allVisitors.filter(v => v.status === 'REGISTERED').length,
+      checkedIn: allVisitors.filter((v) => (v as { status?: string }).status === 'CHECKED_IN').length,
+      checkedOut: allVisitors.filter((v) => (v as { status?: string }).status === 'CHECKED_OUT').length,
+      registered: allVisitors.filter((v) => (v as { status?: string }).status === 'REGISTERED').length,
     };
     
     return stats;

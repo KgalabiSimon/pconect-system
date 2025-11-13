@@ -31,13 +31,13 @@ export interface UseUsersReturn {
   error: string | null;
   
   // Actions
-  loadUsers: (params?: any) => Promise<void>;
-  loadUser: (userId: string) => Promise<void>;
+  loadUsers: (params?: Record<string, unknown>) => Promise<UserResponse[]>;
+  loadUser: (userId: string) => Promise<UserResponse | null>;
   createUser: (userData: UserCreate) => Promise<UserResponse | null>;
   updateUser: (userId: string, userData: UserUpdate) => Promise<UserResponse | null>;
   deleteUser: (userId: string) => Promise<boolean>;
   searchUsers: (query: string, limit?: number) => Promise<UserResponse[]>;
-  getUserCount: (params?: any) => Promise<void>;
+  getUserCount: (params?: Record<string, unknown>) => Promise<number | void>;
   updateProfile: (profileData: UserProfileUpdate) => Promise<UserResponse | null>;
   
   // Utilities
@@ -78,7 +78,7 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
   }, []);
 
   // Load users
-  const loadUsers = useCallback(async (params = {}) => {
+  const loadUsers = useCallback(async (params: Record<string, unknown> = {}) => {
     try {
       setIsLoading(true);
       setError(null);
@@ -111,7 +111,7 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
   }, []);
 
   // Load single user
-  const loadUser = useCallback(async (userId: string) => {
+  const loadUser = useCallback(async (userId: string): Promise<UserResponse | null> => {
     try {
       setIsLoading(true);
       setError(null);
@@ -234,7 +234,7 @@ export const useUsers = (options: UseUsersOptions = {}): UseUsersReturn => {
   }, []);
 
   // Get user count
-  const getUserCount = useCallback(async (params = {}) => {
+  const getUserCount = useCallback(async (params: Record<string, unknown> = {}) => {
     try {
       setError(null);
       
